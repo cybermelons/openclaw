@@ -1,5 +1,6 @@
 import { asPositiveSafeInteger } from "@openclaw/normalization-core/number-coercion";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
+import { reconcileCliTranscript } from "../../agents/cli-transcript-reconcile.js";
 import { resolveSessionTranscriptActiveLeafEntryId } from "../../config/sessions/session-accessor.js";
 import {
   dropPreSessionStartAnnouncePairs,
@@ -348,6 +349,20 @@ export async function readChatHistoryPage(params: {
   const cliSessionId = params.ignoreCliSessionImports
     ? undefined
     : resolveClaudeCliBindingSessionId(entry);
+  if (cliSessionId && entry) {
+    try {
+      await reconcileCliTranscript({
+        entry,
+        sessionKey: canonicalKey,
+        storePath,
+        agentId: sessionAgentId,
+        reason: "resume",
+      });
+    } catch (reconcileError) {
+      // Never break history serving on a reconcile failure.
+      void reconcileError;
+    }
+  }
   // Bound snapshots are terminal by contract, so offset requests return the same
   // full snapshot. Paging oversized imports needs an opaque snapshot cursor and
   // is deferred to a follow-up issue. Anchored reads fall through with them: the

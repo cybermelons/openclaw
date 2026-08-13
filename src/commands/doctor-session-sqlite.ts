@@ -4,6 +4,7 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { tryResolveDefaultAgentId } from "../agents/agent-scope.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
+import { getCliSessionBinding } from "../config/sessions/cli-session-binding.js";
 import { parseSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
 import { resolveSessionFilePathCore } from "../config/sessions/paths.js";
 import { importSqliteSessionRows } from "../config/sessions/session-accessor.sqlite-import.js";
@@ -18,6 +19,11 @@ import {
 } from "../config/sessions/targets.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import {
+  CLAUDE_CLI_PROVIDER,
+  readClaudeCliSessionMessages,
+  resolveClaudeCliSessionFilePath,
+} from "../gateway/cli-session-history.claude.js";
 import { resolveStoredSessionOwnerAgentId } from "../gateway/session-store-key.js";
 import { readFileDescriptorBoundedSync } from "../infra/boundary-file-read.js";
 import { resolveSqliteDatabaseFilePaths } from "../infra/sqlite-files.js";
@@ -949,6 +955,48 @@ function validateLegacySessionRecord(
   }
   report.validatedEntries += 1;
   validateTranscriptEventCount(target, record, report);
+  validateCliJsonlReconciliation(target, record, report);
+}
+
+/**
+ * Read-only check: warns when a bound Claude CLI session's jsonl transcript
+ * has more turns than SQLite transcript_events, meaning the ephemeral jsonl
+ * reader has content that was never reconciled into durable storage.
+ */
+function validateCliJsonlReconciliation(
+  target: SessionStoreTarget,
+  record: LegacySessionRecord,
+  report: DoctorSessionSqliteTargetReport,
+): void {
+  const cliSessionId = getCliSessionBinding(record.entry, CLAUDE_CLI_PROVIDER)?.sessionId;
+  if (!cliSessionId) {
+    return;
+  }
+  const jsonlPath = resolveClaudeCliSessionFilePath({ cliSessionId });
+  if (!jsonlPath) {
+    return;
+  }
+  const jsonlTurns = readClaudeCliSessionMessages({
+    cliSessionId,
+    localSessionId: record.entry.sessionId,
+  }).length;
+  if (jsonlTurns === 0) {
+    return;
+  }
+  const sqliteEvents = readOnlySqliteTranscriptEventCount(target, record.entry.sessionId);
+  if (!sqliteEvents.ok) {
+    return;
+  }
+  if (
+    jsonlTurns > sqliteEvents.events &&
+    !hasSessionIssue(report, "cli_jsonl_transcript_orphan", record.sessionKey)
+  ) {
+    report.issues.push({
+      code: "cli_jsonl_transcript_orphan",
+      message: `Claude CLI jsonl has ${jsonlTurns} turns but SQLite session has ${sqliteEvents.events} events; run recovery/resume to reconcile.`,
+      sessionKey: record.sessionKey,
+    });
+  }
 }
 
 function validateTranscriptEventCount(

@@ -26,6 +26,7 @@ import {
   type DeliveryContext,
 } from "../../utils/delivery-context.shared.js";
 import { isDeliverableMessageChannel } from "../../utils/message-channel.js";
+import { reconcileCliTranscript } from "../cli-transcript-reconcile.js";
 import { buildMainSessionRecoveryClearPatch } from "./main-session-recovery-clear.js";
 import {
   repairMainSessionRecoveryMutation,
@@ -545,6 +546,18 @@ export async function resumeMainSession(params: {
         sanitizedPendingText ? " (with pending payload)" : ""
       }`,
     );
+    try {
+      await reconcileCliTranscript({
+        entry: params.entry,
+        sessionKey: params.sessionKey,
+        storePath: params.storePath,
+        reason: "recovery",
+      });
+    } catch (reconcileError) {
+      log.warn(
+        `cli transcript reconcile failed for ${params.sessionKey}: ${String(reconcileError)}`,
+      );
+    }
     return "resumed";
   } catch (error) {
     const explicitlyRejected = error instanceof GatewayClientRequestError;
@@ -571,6 +584,18 @@ export async function resumeMainSession(params: {
             log.warn(`restart recovery admission changed before settlement: ${params.sessionKey}`);
           } else if (params.shouldContinue?.() !== false) {
             log.info(`settled completed restart recovery for ${params.sessionKey}`);
+            try {
+              await reconcileCliTranscript({
+                entry: params.entry,
+                sessionKey: params.sessionKey,
+                storePath: params.storePath,
+                reason: "recovery",
+              });
+            } catch (reconcileError) {
+              log.warn(
+                `cli transcript reconcile failed for ${params.sessionKey}: ${String(reconcileError)}`,
+              );
+            }
             return "resumed";
           }
         }

@@ -88,6 +88,10 @@ export function getCliSessionBinding(
       mcpConfigHash: normalizeOptionalString(fromBindings?.mcpConfigHash),
       mcpResumeHash: normalizeOptionalString(fromBindings?.mcpResumeHash),
       reseedReceipt: normalizeCliSessionReseedReceipt(fromBindings?.reseedReceipt),
+      ...(typeof fromBindings?.lastReconciledMtimeMs === "number" &&
+      Number.isFinite(fromBindings.lastReconciledMtimeMs)
+        ? { lastReconciledMtimeMs: fromBindings.lastReconciledMtimeMs }
+        : {}),
     };
   }
   const fromMap = entry.cliSessionIds?.[normalized];

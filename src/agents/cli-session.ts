@@ -82,6 +82,10 @@ export function setCliSessionBinding(
         ? { mcpResumeHash: normalizeOptionalString(binding.mcpResumeHash) }
         : {}),
       ...(reseedReceipt ? { reseedReceipt } : {}),
+      ...(typeof binding.lastReconciledMtimeMs === "number" &&
+      Number.isFinite(binding.lastReconciledMtimeMs)
+        ? { lastReconciledMtimeMs: binding.lastReconciledMtimeMs }
+        : {}),
     },
   };
   entry.cliSessionIds = { ...entry.cliSessionIds, [normalized]: trimmed };

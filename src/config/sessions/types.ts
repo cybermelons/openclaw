@@ -134,6 +134,8 @@ export type CliSessionBinding = {
   mcpResumeHash?: string;
   /** Identifies one synthetic history prompt and the trusted local handling of its user turn. */
   reseedReceipt?: CliSessionReseedReceipt;
+  /** mtimeMs of the jsonl transcript last reconciled into SQLite transcript_events. */
+  lastReconciledMtimeMs?: number;
 };
 
 type AcpSessionBinding = {
