@@ -589,6 +589,7 @@ enum class GatewayMethod(
   SessionsAssignOwner("sessions.assignOwner"),
   ProgressCardGet("progressCard.get"),
   ProgressCardPut("progressCard.put"),
+  SessionsWorkspaceStatus("sessions.workspace.status"),
 }
 
 enum class GatewayEvent(

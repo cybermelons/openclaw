@@ -248,6 +248,19 @@ export const SessionFileBrowserResultSchema = closedObject({
   truncated: Type.Optional(Type.Boolean()),
 });
 
+/** Reads lightweight workspace facts without scanning a session transcript. */
+export const SessionsWorkspaceStatusParamsSchema = closedObject({
+  sessionKey: NonEmptyString,
+  agentId: Type.Optional(NonEmptyString),
+});
+
+/** Lightweight workspace facts used by collapsed session controls. */
+export const SessionsWorkspaceStatusResultSchema = closedObject({
+  sessionKey: NonEmptyString,
+  root: Type.Optional(NonEmptyString),
+  gitCheckout: Type.Optional(Type.Boolean()),
+});
+
 /** Lists files touched by a session transcript. */
 export const SessionsFilesListParamsSchema = closedObject({
   sessionKey: NonEmptyString,
@@ -904,6 +917,8 @@ export type SessionFileRelevance = Static<typeof SessionFileRelevanceSchema>;
 export type SessionFileEntry = Static<typeof SessionFileEntrySchema>;
 export type SessionFileBrowserEntry = Static<typeof SessionFileBrowserEntrySchema>;
 export type SessionFileBrowserResult = Static<typeof SessionFileBrowserResultSchema>;
+export type SessionsWorkspaceStatusParams = Static<typeof SessionsWorkspaceStatusParamsSchema>;
+export type SessionsWorkspaceStatusResult = Static<typeof SessionsWorkspaceStatusResultSchema>;
 export type SessionsFilesListParams = Static<typeof SessionsFilesListParamsSchema>;
 export type SessionsFilesListResult = Static<typeof SessionsFilesListResultSchema>;
 export type SessionsFilesGetParams = Static<typeof SessionsFilesGetParamsSchema>;
