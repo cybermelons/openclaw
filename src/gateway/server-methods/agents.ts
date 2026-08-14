@@ -109,6 +109,7 @@ import {
   updateAgentConfigEntry,
 } from "./agents-config-mutations.js";
 import { readPreparedServerMethodModelCatalog } from "./optional-model-catalog.js";
+import { closeSessionTouchedFilesWorker } from "./session-touched-files-worker-runtime.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 
 // Derived from the canonical workspace list so retiring a bootstrap file cannot
@@ -1131,6 +1132,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
         let databasePlan: AgentDeleteDatabasePlan | undefined;
         try {
           prepareJournaledAgentDirOwnership(lockedConfig, agentId, journal.agentDir);
+          await closeSessionTouchedFilesWorker();
           databasePlan = prepareAgentDeleteDatabases(lockedConfig, agentId, journal.agentDir);
           deletion.fenceDatabasePaths([
             ...journal.databasePaths,
