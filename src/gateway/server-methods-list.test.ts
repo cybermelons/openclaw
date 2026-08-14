@@ -130,6 +130,7 @@ describe("listGatewayMethods", () => {
       "sessions.assignOwner",
       "progressCard.get",
       "progressCard.put",
+      "sessions.workspace.status",
     ]);
     const methods = listGatewayMethods();
     expect(methods.indexOf("node.pluginSurface.refresh")).toBe(
@@ -300,6 +301,7 @@ describe("listGatewayMethods", () => {
       "sessions.assignOwner",
       "progressCard.get",
       "progressCard.put",
+      "sessions.workspace.status",
     ]);
     expect(methods.indexOf("approval.get")).toBeGreaterThan(methods.indexOf("tts.speak"));
     expect(methods.indexOf("approval.resolve")).toBe(methods.indexOf("approval.get") + 1);
@@ -340,6 +342,9 @@ describe("listGatewayMethods", () => {
     expect(methods.indexOf("sessions.assignOwner")).toBe(methods.indexOf("sessions.move") + 1);
     expect(methods.indexOf("progressCard.get")).toBe(methods.indexOf("sessions.assignOwner") + 1);
     expect(methods.indexOf("progressCard.put")).toBe(methods.indexOf("progressCard.get") + 1);
+    expect(methods.indexOf("sessions.workspace.status")).toBe(
+      methods.indexOf("progressCard.put") + 1,
+    );
   });
 
   it("advertises the versioned Talk session RPCs", () => {
