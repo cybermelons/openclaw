@@ -465,12 +465,15 @@ function loadWorkspaceStatus(
 }
 
 /** Refresh workspace facts after a run, which may have created a git checkout. */
-export function refreshSessionWorkspace(state: SessionWorkspaceHost) {
+export function refreshSessionWorkspace(
+  state: SessionWorkspaceHost,
+  options?: { expanded?: boolean },
+) {
   const workspace = state.sessionWorkspaceState;
   if (!workspace || workspace.sessionKey !== state.sessionKey) {
     return;
   }
-  if (workspace.collapsed) {
+  if (options?.expanded !== true && workspace.collapsed) {
     loadWorkspaceStatus(state, workspace, true);
     return;
   }

@@ -517,7 +517,10 @@ export function handlePageGatewayEvent(state: ChatPageHost, event: GatewayEventF
       removeDeliveredQueuedChatSendForRun(state, payload?.runId);
       void resumeStoredChatOutboxes(state);
       if (chatScopedEventSessionMatches(state, payload?.sessionKey, payload?.agentId)) {
-        refreshSessionWorkspace(state);
+        const workspaceExpanded =
+          state.sidebarLayout.columns[0]?.panels.some((panel) => panel.slot === "workspace") ===
+          true;
+        refreshSessionWorkspace(state, { expanded: workspaceExpanded });
       }
     }
     requestChatPageUpdate(state, payload?.state === "delta" ? "animation-frame" : "immediate");
