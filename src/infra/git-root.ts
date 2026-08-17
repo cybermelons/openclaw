@@ -62,7 +62,15 @@ function resolveGitDirFromMarker(repoRoot: string): string | null {
   }
 }
 
-function resolveCommonGitDir(gitDir: string): string | null {
+function resolveCommonGitDir(
+  gitDir: string,
+  startDir: string,
+  env: NodeJS.ProcessEnv,
+): string | null {
+  const explicitCommonDir = env.GIT_COMMON_DIR?.trim();
+  if (explicitCommonDir) {
+    return path.resolve(startDir, explicitCommonDir);
+  }
   const commonDirPath = path.join(gitDir, "commondir");
   try {
     const stat = fs.statSync(commonDirPath);
@@ -76,16 +84,36 @@ function resolveCommonGitDir(gitDir: string): string | null {
   }
 }
 
-export function findUsableGitCheckoutRoot(startDir: string): string | null {
-  const repoRoot = findGitRoot(startDir, { maxDepth: Number.MAX_SAFE_INTEGER });
+function resolveExplicitGitCheckout(
+  startDir: string,
+  env: NodeJS.ProcessEnv,
+): { gitDir: string; repoRoot: string } | null {
+  const gitDir = env.GIT_DIR?.trim();
+  const workTree = env.GIT_WORK_TREE?.trim();
+  if (!gitDir || !workTree) {
+    return null;
+  }
+  return {
+    gitDir: path.resolve(startDir, gitDir),
+    repoRoot: path.resolve(startDir, workTree),
+  };
+}
+
+export function findUsableGitCheckoutRoot(
+  startDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const explicit = resolveExplicitGitCheckout(startDir, env);
+  const repoRoot =
+    explicit?.repoRoot ?? findGitRoot(startDir, { maxDepth: Number.MAX_SAFE_INTEGER });
   if (!repoRoot) {
     return null;
   }
-  const gitDir = resolveGitDirFromMarker(repoRoot);
+  const gitDir = explicit?.gitDir ?? resolveGitDirFromMarker(repoRoot);
   if (!gitDir) {
     return null;
   }
-  const commonGitDir = resolveCommonGitDir(gitDir);
+  const commonGitDir = resolveCommonGitDir(gitDir, startDir, env);
   if (!commonGitDir) {
     return null;
   }
@@ -100,8 +128,11 @@ export function findUsableGitCheckoutRoot(startDir: string): string | null {
   }
 }
 
-export function hasUsableGitMetadata(startDir: string): boolean {
-  return findUsableGitCheckoutRoot(startDir) !== null;
+export function hasUsableGitMetadata(
+  startDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return findUsableGitCheckoutRoot(startDir, env) !== null;
 }
 
 export function resolveGitHeadPath(

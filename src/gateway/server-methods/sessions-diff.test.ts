@@ -106,17 +106,23 @@ describe("sessions.diff parsers", () => {
 });
 
 describe("loadSessionDiff", () => {
+  let externalGitDir: string | undefined;
   let repoRoot: string;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    externalGitDir = undefined;
     repoRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-")));
     hoisted.resolveDefaultAgentId.mockReturnValue("main");
     hoisted.resolveAgentWorkspaceDir.mockReturnValue(repoRoot);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(repoRoot, { recursive: true, force: true });
+    if (externalGitDir) {
+      fs.rmSync(externalGitDir, { recursive: true, force: true });
+    }
   });
 
   it("reports unknown sessions without touching a workspace", async () => {
@@ -172,6 +178,25 @@ describe("loadSessionDiff", () => {
     const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
 
     expect(result.unavailableReason).toBeUndefined();
+    expect(result.files).toEqual([
+      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
+    ]);
+  });
+
+  it("loads diffs from an explicitly configured Git worktree", async () => {
+    externalGitDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-env-")),
+    );
+    execFileSync("git", ["init", "--bare", "--quiet", externalGitDir]);
+    vi.stubEnv("GIT_DIR", externalGitDir);
+    vi.stubEnv("GIT_WORK_TREE", repoRoot);
+    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "explicit worktree\n");
+    mockSession(repoRoot);
+
+    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
+
+    expect(result.unavailableReason).toBeUndefined();
+    expect(result.root).toBe(repoRoot);
     expect(result.files).toEqual([
       expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
     ]);

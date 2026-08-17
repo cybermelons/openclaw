@@ -66,6 +66,7 @@ describe("sessions.workspace.status RPC handler", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     removeWorkspaceFixture(workspaceRoot);
   });
 
@@ -141,6 +142,25 @@ describe("sessions.workspace.status RPC handler", () => {
       }),
     );
     expect(initializedPayload.gitCheckout).toBe(true);
+    expect(hoisted.runGit).not.toHaveBeenCalled();
+  });
+
+  it("honors explicit Git worktree overrides without spawning Git", async () => {
+    const gitDir = path.join(workspaceRoot, ".explicit-git-dir");
+    const gitInit = await import("node:child_process").then(({ execFileSync }) =>
+      execFileSync("git", ["init", "--bare", "--quiet", gitDir]),
+    );
+    expect(gitInit).toBeInstanceOf(Buffer);
+    vi.stubEnv("GIT_DIR", gitDir);
+    vi.stubEnv("GIT_WORK_TREE", workspaceRoot);
+
+    const payload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.workspace.status", {
+        sessionKey: "agent:main:main",
+      }),
+    );
+
+    expect(payload.gitCheckout).toBe(true);
     expect(hoisted.runGit).not.toHaveBeenCalled();
   });
 });
