@@ -66,7 +66,6 @@ describe("sessions.workspace.status RPC handler", () => {
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
     removeWorkspaceFixture(workspaceRoot);
   });
 
@@ -106,81 +105,87 @@ describe("sessions.workspace.status RPC handler", () => {
     expect(removedCheckoutPayload.gitCheckout).toBe(false);
   });
 
-  it("rejects invalid metadata and detects nested checkouts without spawning Git", async () => {
-    const checkoutRoot = path.join(workspaceRoot, "checkout");
-    const nestedRoot = path.join(checkoutRoot, "packages", "app");
-    fs.mkdirSync(nestedRoot, { recursive: true });
-    fs.mkdirSync(path.join(checkoutRoot, ".git"));
+  it("coalesces only concurrent checkout probes", async () => {
+    let finishProbe: (result: { code: number; stderr: string; stdout: string }) => void = () => {};
+    hoisted.runGit.mockImplementationOnce(
+      async () =>
+        await new Promise((resolve) => {
+          finishProbe = resolve;
+        }),
+    );
+
+    const first = invokeSessionFilesHandler("sessions.workspace.status", {
+      sessionKey: "agent:main:main",
+    });
+    const second = invokeSessionFilesHandler("sessions.workspace.status", {
+      sessionKey: "agent:main:main",
+    });
+    await vi.waitFor(() => expect(hoisted.runGit).toHaveBeenCalledOnce());
+
+    finishProbe({ code: 0, stderr: "", stdout: `${workspaceRoot}\n` });
+    const [firstPayload, secondPayload] = await Promise.all([
+      first.then(expectOkPayload),
+      second.then(expectOkPayload),
+    ]);
+    expect(firstPayload.gitCheckout).toBe(true);
+    expect(secondPayload).toEqual(firstPayload);
+
+    hoisted.runGit.mockResolvedValueOnce({ code: 1, stderr: "not a checkout", stdout: "" });
+    const freshPayload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.workspace.status", {
+        sessionKey: "agent:main:main",
+      }),
+    );
+    expect(freshPayload.gitCheckout).toBe(false);
+    expect(hoisted.runGit).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not queue a healthy workspace behind stalled probes", async () => {
+    let releaseProbes: () => void = () => {};
+    const probeGate = new Promise<void>((resolve) => {
+      releaseProbes = resolve;
+    });
     hoisted.loadSessionEntry.mockImplementation((sessionKey: string) => {
+      const sessionId = sessionKey.split(":").at(-1) ?? "main";
+      const sessionRoot = path.join(workspaceRoot, sessionId);
       return {
         agentId: "main",
         canonicalKey: sessionKey,
         cfg: {},
         storePath: path.join(workspaceRoot, ".sessions.json"),
         entry: {
-          sessionId: "nested-checkout",
-          sessionFile: "nested-checkout.jsonl",
-          spawnedCwd: nestedRoot,
+          sessionId,
+          sessionFile: `${sessionId}.jsonl`,
+          spawnedCwd: sessionRoot,
         },
       };
     });
+    const runPressureProbe = async (cwd: string) => {
+      if (cwd.endsWith("pressure-4")) {
+        return { code: 0, stderr: "", stdout: `${cwd}\n` };
+      }
+      await probeGate;
+      return { code: 0, stderr: "", stdout: `${cwd}\n` };
+    };
 
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.workspace.status", {
-        sessionKey: "agent:main:nested-checkout",
-      }),
-    );
-    expect(payload.gitCheckout).toBe(false);
+    await hoisted.runGit.withImplementation(runPressureProbe, async () => {
+      const stalledRequests = Array.from({ length: 4 }, (_, index) =>
+        invokeSessionFilesHandler("sessions.workspace.status", {
+          sessionKey: `agent:main:pressure-${String(index)}`,
+        }),
+      );
+      await vi.waitFor(() => expect(hoisted.runGit).toHaveBeenCalledTimes(4));
 
-    const gitInit = await import("node:child_process").then(({ execFileSync }) =>
-      execFileSync("git", ["init", "--quiet", "--ref-format=reftable"], { cwd: checkoutRoot }),
-    );
-    expect(gitInit).toBeInstanceOf(Buffer);
-    const initializedPayload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.workspace.status", {
-        sessionKey: "agent:main:nested-checkout",
-      }),
-    );
-    expect(initializedPayload.gitCheckout).toBe(true);
-    expect(hoisted.runGit).not.toHaveBeenCalled();
-  });
+      const healthyPayload = expectOkPayload(
+        await invokeSessionFilesHandler("sessions.workspace.status", {
+          sessionKey: "agent:main:pressure-4",
+        }),
+      );
+      expect(healthyPayload.gitCheckout).toBe(true);
+      expect(hoisted.runGit).toHaveBeenCalledTimes(5);
 
-  it("honors explicit Git worktree overrides without spawning Git", async () => {
-    const gitDir = path.join(workspaceRoot, ".explicit-git-dir");
-    const gitInit = await import("node:child_process").then(({ execFileSync }) =>
-      execFileSync("git", ["init", "--bare", "--quiet", gitDir]),
-    );
-    expect(gitInit).toBeInstanceOf(Buffer);
-    vi.stubEnv("GIT_DIR", gitDir);
-    vi.stubEnv("GIT_WORK_TREE", workspaceRoot);
-
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.workspace.status", {
-        sessionKey: "agent:main:main",
-      }),
-    );
-
-    expect(payload.gitCheckout).toBe(true);
-    expect(hoisted.runGit).not.toHaveBeenCalled();
-  });
-
-  it("delegates a GIT_DIR-only override to Git's config-aware resolver", async () => {
-    const metadataSource = path.join(workspaceRoot, "metadata-source");
-    fs.mkdirSync(metadataSource);
-    const gitInit = await import("node:child_process").then(({ execFileSync }) =>
-      execFileSync("git", ["init", "--quiet"], { cwd: metadataSource }),
-    );
-    expect(gitInit).toBeInstanceOf(Buffer);
-    vi.stubEnv("GIT_DIR", path.join(metadataSource, ".git"));
-
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.workspace.status", {
-        sessionKey: "agent:main:main",
-      }),
-    );
-
-    expect(payload.gitCheckout).toBe(true);
-    expect(hoisted.runGit).toHaveBeenCalledOnce();
-    expect(hoisted.runGit).toHaveBeenCalledWith(workspaceRoot, ["rev-parse", "--show-toplevel"]);
+      releaseProbes();
+      await Promise.all(stalledRequests);
+    });
   });
 });

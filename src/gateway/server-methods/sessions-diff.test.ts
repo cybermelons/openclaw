@@ -44,8 +44,8 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
 }
 
-function initRepo(root: string, refFormat?: "reftable"): void {
-  git(root, "init", "-q", "-b", "main", ...(refFormat ? [`--ref-format=${refFormat}`] : []));
+function initRepo(root: string): void {
+  git(root, "init", "-q", "-b", "main");
   git(root, "config", "user.email", "test@openclaw.test");
   git(root, "config", "user.name", "Test");
   git(root, "config", "commit.gpgsign", "false");
@@ -106,23 +106,17 @@ describe("sessions.diff parsers", () => {
 });
 
 describe("loadSessionDiff", () => {
-  let externalGitDir: string | undefined;
   let repoRoot: string;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    externalGitDir = undefined;
     repoRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-")));
     hoisted.resolveDefaultAgentId.mockReturnValue("main");
     hoisted.resolveAgentWorkspaceDir.mockReturnValue(repoRoot);
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
     fs.rmSync(repoRoot, { recursive: true, force: true });
-    if (externalGitDir) {
-      fs.rmSync(externalGitDir, { recursive: true, force: true });
-    }
   });
 
   it("reports unknown sessions without touching a workspace", async () => {
@@ -159,112 +153,6 @@ describe("loadSessionDiff", () => {
 
     expect(result.files.map((file) => file.path)).toEqual(["pending.txt"]);
     expect(hoisted.patchSessionEntryCore).not.toHaveBeenCalled();
-  });
-
-  it("rejects an incomplete checkout marker before loading a diff", async () => {
-    fs.mkdirSync(path.join(repoRoot, ".git"));
-    mockSession(repoRoot);
-
-    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
-
-    expect(result.unavailableReason).toBe("not_git");
-  });
-
-  it("loads diffs from a checkout using Git's reftable backend", async () => {
-    initRepo(repoRoot, "reftable");
-    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "reftable\n");
-    mockSession(repoRoot);
-
-    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
-
-    expect(result.unavailableReason).toBeUndefined();
-    expect(result.files).toEqual([
-      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
-    ]);
-  });
-
-  it("loads diffs from an explicitly configured Git worktree", async () => {
-    externalGitDir = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-env-")),
-    );
-    execFileSync("git", ["init", "--bare", "--quiet", externalGitDir]);
-    vi.stubEnv("GIT_DIR", externalGitDir);
-    vi.stubEnv("GIT_WORK_TREE", repoRoot);
-    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "explicit worktree\n");
-    mockSession(repoRoot);
-
-    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
-
-    expect(result.unavailableReason).toBeUndefined();
-    expect(result.root).toBe(repoRoot);
-    expect(result.files).toEqual([
-      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
-    ]);
-  });
-
-  it("loads diffs with a non-bare GIT_DIR and the session cwd as worktree", async () => {
-    externalGitDir = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-git-dir-")),
-    );
-    execFileSync("git", ["init", "--quiet"], { cwd: externalGitDir });
-    vi.stubEnv("GIT_DIR", path.join(externalGitDir, ".git"));
-    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "GIT_DIR worktree\n");
-    mockSession(repoRoot);
-
-    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
-
-    expect(result.unavailableReason).toBeUndefined();
-    expect(result.root).toBe(repoRoot);
-    expect(result.files).toEqual([
-      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
-    ]);
-  });
-
-  it("honors core.worktree from an included Git config", async () => {
-    externalGitDir = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-include-")),
-    );
-    execFileSync("git", ["init", "--quiet"], { cwd: externalGitDir });
-    const gitDir = path.join(externalGitDir, ".git");
-    const includedConfig = path.join(externalGitDir, "worktree.config");
-    fs.writeFileSync(includedConfig, `[core]\n\tworktree = ${repoRoot}\n`);
-    execFileSync("git", ["--git-dir", gitDir, "config", "include.path", includedConfig]);
-    vi.stubEnv("GIT_DIR", gitDir);
-    const nestedCwd = path.join(repoRoot, "nested");
-    fs.mkdirSync(nestedCwd);
-    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "included worktree\n");
-    mockSession(nestedCwd);
-
-    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
-
-    expect(result.unavailableReason).toBeUndefined();
-    expect(result.root).toBe(repoRoot);
-    expect(result.files).toEqual([
-      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
-    ]);
-  });
-
-  it("ignores core.worktree when GIT_COMMON_DIR is explicit", async () => {
-    externalGitDir = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-common-dir-")),
-    );
-    execFileSync("git", ["init", "--quiet"], { cwd: externalGitDir });
-    const gitDir = path.join(externalGitDir, ".git");
-    execFileSync("git", ["--git-dir", gitDir, "config", "core.worktree", repoRoot]);
-    vi.stubEnv("GIT_DIR", gitDir);
-    vi.stubEnv("GIT_COMMON_DIR", gitDir);
-    const nestedCwd = path.join(repoRoot, "nested");
-    fs.mkdirSync(nestedCwd);
-    fs.writeFileSync(path.join(nestedCwd, "untracked.txt"), "common dir worktree\n");
-    mockSession(nestedCwd);
-
-    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
-
-    expect(result.unavailableReason).toBeUndefined();
-    expect(result.root).toBe(nestedCwd);
-    expect(result.files).toEqual([
-      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
-    ]);
   });
 
   it("uses the persisted fixed-store owner for a bare session checkout", async () => {

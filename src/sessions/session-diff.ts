@@ -10,7 +10,6 @@ import type {
 } from "../../packages/gateway-protocol/src/index.js";
 import { runGit } from "../agents/worktrees/git.js";
 import type { SessionDiffBaseline } from "../config/sessions/types.js";
-import { findUsableGitCheckoutRoot } from "../infra/git-root.js";
 import { runCommandBuffered } from "../process/exec.js";
 import {
   loadSessionDiffBranchMetadata,
@@ -363,20 +362,6 @@ type CheckoutDiffParams = { cwd: string; sessionKey: string } & (
   | { scope: "commit"; commit: string }
 );
 
-async function resolveGitDirOnlyCheckoutRoot(cwd: string): Promise<string | null> {
-  // Git ignores core.worktree when GIT_COMMON_DIR is explicit, so only consult
-  // config when that setting can participate in repository setup.
-  if (!process.env.GIT_COMMON_DIR?.trim()) {
-    const configuredWorkTree = (
-      await gitOut(cwd, ["config", "--path", "--get", "core.worktree"])
-    )?.trim();
-    if (configuredWorkTree) {
-      return nodePath.resolve(cwd, configuredWorkTree);
-    }
-  }
-  return (await gitOut(cwd, ["rev-parse", "--show-toplevel"]))?.trim() || null;
-}
-
 export async function loadCheckoutDiff(params: CheckoutDiffParams): Promise<SessionsDiffResult> {
   const empty = (
     unavailableReason?: NonNullable<SessionsDiffResult["unavailableReason"]>,
@@ -387,15 +372,7 @@ export async function loadCheckoutDiff(params: CheckoutDiffParams): Promise<Sess
     deletions: 0,
     ...(unavailableReason ? { unavailableReason } : {}),
   });
-  // GIT_DIR without GIT_WORK_TREE can derive its root from included core.worktree
-  // configuration. Diff loading already invokes Git, so preserve Git's complete config
-  // semantics at this exceptional boundary instead of partially parsing config files.
-  const explicitGitDir = process.env.GIT_DIR?.trim();
-  const explicitWorkTree = process.env.GIT_WORK_TREE?.trim();
-  const root =
-    explicitGitDir && !explicitWorkTree
-      ? await resolveGitDirOnlyCheckoutRoot(params.cwd)
-      : findUsableGitCheckoutRoot(params.cwd);
+  const root = (await gitOut(params.cwd, ["rev-parse", "--show-toplevel"]))?.trim();
   if (!root) {
     return empty("not_git");
   }

@@ -1,7 +1,6 @@
 // Discovers git repository roots by walking ancestor directories.
 import fs from "node:fs";
 import path from "node:path";
-import { hasErrnoCode } from "./errno.js";
 
 const DEFAULT_GIT_DISCOVERY_MAX_DEPTH = 12;
 
@@ -60,96 +59,6 @@ function resolveGitDirFromMarker(repoRoot: string): string | null {
   } catch {
     return null;
   }
-}
-
-function resolveCommonGitDir(
-  gitDir: string,
-  startDir: string,
-  env: NodeJS.ProcessEnv,
-): string | null {
-  const explicitCommonDir = env.GIT_COMMON_DIR?.trim();
-  if (explicitCommonDir) {
-    return path.resolve(startDir, explicitCommonDir);
-  }
-  const commonDirPath = path.join(gitDir, "commondir");
-  try {
-    const stat = fs.statSync(commonDirPath);
-    if (!stat.isFile()) {
-      return null;
-    }
-    const relative = fs.readFileSync(commonDirPath, "utf-8").trim();
-    return relative ? path.resolve(gitDir, relative) : null;
-  } catch (error) {
-    return hasErrnoCode(error, "ENOENT") ? gitDir : null;
-  }
-}
-
-type ResolvedGitCheckout = {
-  gitDir: string;
-  repoRoot: string;
-};
-
-function resolveGitCheckout(startDir: string, env: NodeJS.ProcessEnv): ResolvedGitCheckout | null {
-  const explicitGitDir = env.GIT_DIR?.trim();
-  const explicitWorkTree = env.GIT_WORK_TREE?.trim();
-  if (explicitGitDir && !explicitWorkTree) {
-    // Git config (including includes and conditional includes) decides whether
-    // this is a worktree. Callers that support this override delegate to Git.
-    return null;
-  }
-  const markerRoot = explicitGitDir
-    ? null
-    : findGitRoot(startDir, { maxDepth: Number.MAX_SAFE_INTEGER });
-  const gitDir = explicitGitDir
-    ? path.resolve(startDir, explicitGitDir)
-    : markerRoot
-      ? resolveGitDirFromMarker(markerRoot)
-      : null;
-  if (!gitDir) {
-    return null;
-  }
-  const repoRoot = explicitWorkTree
-    ? path.resolve(startDir, explicitWorkTree)
-    : explicitGitDir
-      ? path.resolve(startDir)
-      : markerRoot;
-  if (!repoRoot) {
-    return null;
-  }
-  return {
-    gitDir,
-    repoRoot,
-  };
-}
-
-export function findUsableGitCheckoutRoot(
-  startDir: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string | null {
-  const checkout = resolveGitCheckout(startDir, env);
-  if (!checkout) {
-    return null;
-  }
-  const commonGitDir = resolveCommonGitDir(checkout.gitDir, startDir, env);
-  if (!commonGitDir) {
-    return null;
-  }
-  try {
-    const usable =
-      fs.statSync(path.join(checkout.gitDir, "HEAD")).isFile() &&
-      fs.statSync(path.join(commonGitDir, "objects")).isDirectory() &&
-      fs.statSync(path.join(commonGitDir, "refs")).isDirectory();
-    return usable ? checkout.repoRoot : null;
-  } catch {
-    return null;
-  }
-}
-
-export function hasUsableGitMetadata(
-  startDir: string,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return findUsableGitCheckoutRoot(startDir, env) !== null;
 }
 
 export function resolveGitHeadPath(

@@ -24,7 +24,6 @@ import { resolveToCwd as resolveSessionToolPathToCwd } from "../../agents/sessio
 import { runGit } from "../../agents/worktrees/git.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
-import { hasUsableGitMetadata } from "../../infra/git-root.js";
 import { isPathInside } from "../../infra/path-guards.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
@@ -76,6 +75,7 @@ const MAX_PREVIEW_BYTES = WORKSPACE_PREVIEW_MAX_BYTES;
 const MAX_BROWSER_ENTRIES = 250;
 const MAX_SEARCH_ENTRIES = 500;
 const MAX_SEARCH_VISITED_ENTRIES = 5_000;
+const gitCheckoutStatusProbes = new Map<string, Promise<boolean>>();
 // Matches file-type's documented default buffer sample while keeping metadata
 // classification independent from the 256 KiB inline-content cap.
 const MIME_SNIFF_PREFIX_BYTES = 4_100;
@@ -557,15 +557,28 @@ async function loadGitCheckoutStatus(diffCwd: string | undefined): Promise<boole
   if (!diffCwd) {
     return undefined;
   }
-  if (process.env.GIT_DIR?.trim() && !process.env.GIT_WORK_TREE?.trim()) {
+  const cacheKey = path.resolve(diffCwd);
+  const activeProbe = gitCheckoutStatusProbes.get(cacheKey);
+  if (activeProbe) {
+    return await activeProbe;
+  }
+
+  const promise = (async () => {
     try {
-      const result = await runGit(diffCwd, ["rev-parse", "--show-toplevel"]);
-      return result.code === 0;
+      const result = await runGit(cacheKey, ["rev-parse", "--show-toplevel"]);
+      return result.code === 0 && Boolean(result.stdout.trim());
     } catch {
       return false;
     }
+  })();
+  gitCheckoutStatusProbes.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    if (gitCheckoutStatusProbes.get(cacheKey) === promise) {
+      gitCheckoutStatusProbes.delete(cacheKey);
+    }
   }
-  return hasUsableGitMetadata(diffCwd);
 }
 
 async function buildWorkspaceStatus(params: {
