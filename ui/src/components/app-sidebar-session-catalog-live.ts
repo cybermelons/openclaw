@@ -310,8 +310,9 @@ export class SessionCatalogLiveState {
       const rawId = typeof record.deviceId === "string" ? record.deviceId : record.instanceId;
       const id = typeof rawId === "string" ? rawId.trim().toLowerCase() : "";
       const mode = typeof record.mode === "string" ? record.mode.trim().toLowerCase() : "";
+      const hasAuthenticatedRoles = Array.isArray(record.roles);
       const hasNodeRole =
-        Array.isArray(record.roles) &&
+        hasAuthenticatedRoles &&
         record.roles.some(
           (role) => typeof role === "string" && role.trim().toLowerCase() === "node",
         );
@@ -319,7 +320,7 @@ export class SessionCatalogLiveState {
       // every tab connect, disconnect, and watched-session update, but cannot change the
       // native host inventory and must not trigger another full catalog scan. Older nodes
       // can omit mode, but their authenticated node role remains authoritative.
-      if (!id || (mode !== "node" && !hasNodeRole)) {
+      if (!id || (hasAuthenticatedRoles ? !hasNodeRole : mode !== "node")) {
         continue;
       }
       const reason = typeof record.reason === "string" ? record.reason.trim().toLowerCase() : "";

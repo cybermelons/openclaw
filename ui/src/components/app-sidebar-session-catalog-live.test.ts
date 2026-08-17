@@ -13,6 +13,11 @@ describe("SessionCatalogLiveState presence refreshes", () => {
     expect(
       live.observePresence({ presence: [{ deviceId: "browser-client", mode: "webchat" }] }),
     ).toBe(false);
+    expect(
+      live.observePresence({
+        presence: [{ deviceId: "operator-client", mode: "node", roles: ["operator"] }],
+      }),
+    ).toBe(false);
   });
 
   it("invalidates when explicit node presence changes", () => {
