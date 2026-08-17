@@ -286,7 +286,7 @@ jobs:
         timeout-minutes: 20
         shell: pwsh
         env:
-          EXPECTED_HEAD: ${{ inputs.target_ref }}
+          EXPECTED_REF: ${{ inputs.target_ref }}
         run: |
           $ErrorActionPreference = "Stop"
           $artifactDir = Join-Path $env:GITHUB_WORKSPACE ".artifacts\windows-git-install"
@@ -302,8 +302,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
           try {
             $head = (git rev-parse HEAD).Trim()
-            if ($head -ne $env:EXPECTED_HEAD) {
-              throw "Checked out $head, expected frozen target $env:EXPECTED_HEAD."
+            $expectedHead = (git rev-parse --verify "$($env:EXPECTED_REF)^{commit}").Trim()
+            if ($LASTEXITCODE -ne 0 -or $head -ne $expectedHead) {
+              throw "Checked out $head, expected $env:EXPECTED_REF at $expectedHead."
             }
 
             git worktree add --detach --force -- $proofRepo $head | Out-Host
@@ -338,16 +339,41 @@ jobs:
             }
 
             $wrapperPath = Join-Path $proofHome ".local\bin\openclaw.cmd"
-            Copy-Item -LiteralPath $wrapperPath -Destination (Join-Path $artifactDir "openclaw.cmd")
+            Copy-Item -LiteralPath $wrapperPath -Destination (Join-Path $artifactDir "openclaw-installed.cmd")
             $wrapper = Get-Content -LiteralPath $wrapperPath -Raw
             $escapedPaths =
-              $wrapper.Contains("^openclaw_proof_caret^") -and
+              $wrapper.Contains("^^openclaw_proof_caret^^") -and
               $wrapper.Contains("%%OPENCLAW_PROOF_PERCENT%%") -and
               $wrapper.Contains("!openclaw_proof_bang!") -and
               $wrapper.Contains("setlocal DisableDelayedExpansion")
             if (-not $escapedPaths) {
               throw "Generated wrapper did not preserve CMD metacharacters."
             }
+
+            $entryPath = Join-Path $proofRepo "dist\entry.js"
+            $legacyWrapper = "@echo off`r`nnode `"$entryPath`" %*`r`n"
+            [System.IO.File]::WriteAllText($wrapperPath, $legacyWrapper, (New-Object System.Text.UTF8Encoding($false)))
+            $doctorLog = Join-Path $artifactDir "doctor-launcher-migration.log"
+            $doctorOutput = @(
+              & $validatedNode (Join-Path $proofRepo "openclaw.mjs") doctor --fix --non-interactive 2>&1 |
+                Tee-Object -FilePath $doctorLog |
+                ForEach-Object { $_.ToString() }
+            )
+            $doctorExit = $LASTEXITCODE
+            if ($doctorExit -ne 0) {
+              throw "Doctor launcher migration exited $doctorExit`: $($doctorOutput -join "`n")"
+            }
+            $wrapper = Get-Content -LiteralPath $wrapperPath -Raw
+            $legacyLauncherMigrated =
+              $wrapper.Contains("rem OpenClaw Git launcher") -and
+              $wrapper.Contains("^^openclaw_proof_caret^^") -and
+              $wrapper.Contains("%%OPENCLAW_PROOF_PERCENT%%") -and
+              $wrapper.Contains("!openclaw_proof_bang!") -and
+              -not $wrapper.Contains("`r`nnode `"")
+            if (-not $legacyLauncherMigrated) {
+              throw "Doctor did not migrate the legacy PATH-based Git launcher."
+            }
+            Copy-Item -LiteralPath $wrapperPath -Destination (Join-Path $artifactDir "openclaw-migrated.cmd")
 
             $env:OPENCLAW_PROOF_PERCENT = "expanded-away"
             $env:openclaw_proof_bang = "expanded-away"
@@ -400,7 +426,9 @@ jobs:
 
             [ordered]@{
               head = $head
+              doctorExit = $doctorExit
               installerExit = $installerExit
+              legacyLauncherMigratedByDoctor = $legacyLauncherMigrated
               missingRuntimeExit = $missingExit
               missingRuntimeFailedClosed = $true
               wrapperCmdExit = $cmdExit

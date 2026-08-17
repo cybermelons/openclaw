@@ -1613,11 +1613,21 @@ function New-TransactionalGitCheckout {
     }
 }
 
-function ConvertTo-CmdLiteral {
-    param([string]$Value)
+function Install-GitLauncher {
+    param(
+        [string]$NodePath,
+        [string]$EntryPath
+    )
 
-    # Quoted paths preserve carets, and the wrapper disables delayed expansion for bangs.
-    return $Value.Replace("%", "%%")
+    $previousHome = $env:HOME
+    try {
+        # Keep the TypeScript owner on the same Windows profile path used below.
+        $env:HOME = $env:USERPROFILE
+        & $NodePath $EntryPath update install-git-launcher
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        $env:HOME = $previousHome
+    }
 }
 
 function Install-OpenClawFromGit {
@@ -1738,20 +1748,10 @@ function Install-OpenClawFromGit {
         New-Item -ItemType Directory -Force -Path $binDir | Out-Null
     }
     $cmdPath = Join-Path $binDir "openclaw.cmd"
-    $cmdNodePath = ConvertTo-CmdLiteral -Value $nodePath
-    $cmdEntryPath = ConvertTo-CmdLiteral -Value $entryPath
-    $cmdContents = @(
-        "@echo off"
-        "setlocal DisableDelayedExpansion"
-        "if exist ""$cmdNodePath"" goto openclaw_runtime_ready"
-        "echo [!] OpenClaw's validated Node.js runtime is missing. 1>&2"
-        "echo [i] Re-run the OpenClaw installer to repair this Git installation. 1>&2"
-        "exit /b 1"
-        ":openclaw_runtime_ready"
-        """$cmdNodePath"" ""$cmdEntryPath"" %*"
-        ""
-    ) -join "`r`n"
-    Set-Content -Path $cmdPath -Value $cmdContents -NoNewline
+    if (-not (Install-GitLauncher -NodePath $nodePath -EntryPath $entryPath)) {
+        Write-Host "[!] Failed to install the OpenClaw Git launcher" -ForegroundColor Red
+        return $false
+    }
 
     if (Add-ToUserPath $binDir) {
         Write-Host "[!] Added $binDir to user PATH (restart terminal if command not found)" -ForegroundColor Yellow
