@@ -202,9 +202,12 @@ describe("session touched-files worker runtime", () => {
       const close = acquireSessionTouchedFilesWorkerAdmissionFence().then((releaseFence) => {
         releaseFence();
       });
+      const loadRejection = expect(load).rejects.toThrow(
+        "session touched-files worker shutdown timed out",
+      );
       await vi.advanceTimersByTimeAsync(5_000);
 
-      await expect(load).rejects.toThrow("session touched-files worker shutdown timed out");
+      await loadRejection;
       await expect(close).resolves.toBeUndefined();
     } finally {
       postMessageSpy.mockRestore();
