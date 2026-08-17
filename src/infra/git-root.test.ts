@@ -168,22 +168,42 @@ describe("git-root", () => {
     });
   });
 
-  it("honors explicit Git directory and worktree overrides", async () => {
+  it("honors Git directory and worktree environment overrides", async () => {
     await withTestDir({ prefix: "openclaw-git-root-env-" }, async (temp) => {
       const gitDir = path.join(temp, "repo.git");
+      const metadataSource = path.join(temp, "metadata-source");
       const workTree = path.join(temp, "workspace");
       const unrelatedCwd = path.join(temp, "elsewhere");
+      await fs.mkdir(metadataSource);
       await fs.mkdir(workTree);
       await fs.mkdir(unrelatedCwd);
       execFileSync("git", ["init", "--bare", "--quiet", gitDir]);
+      execFileSync("git", ["init", "--quiet"], { cwd: metadataSource });
 
-      const env = {
-        GIT_DIR: gitDir,
-        GIT_WORK_TREE: workTree,
-      } satisfies NodeJS.ProcessEnv;
       expect(findGitRoot(unrelatedCwd)).toBeNull();
-      expect(findUsableGitCheckoutRoot(unrelatedCwd, env)).toBe(workTree);
-      expect(hasUsableGitMetadata(unrelatedCwd, env)).toBe(true);
+      expect(
+        findUsableGitCheckoutRoot(unrelatedCwd, {
+          GIT_DIR: gitDir,
+          GIT_WORK_TREE: workTree,
+        }),
+      ).toBe(workTree);
+      expect(
+        findUsableGitCheckoutRoot(unrelatedCwd, {
+          GIT_DIR: path.join(metadataSource, ".git"),
+        }),
+      ).toBe(unrelatedCwd);
+      execFileSync(
+        "git",
+        ["--git-dir", path.join(metadataSource, ".git"), "config", "core.worktree", workTree],
+        { cwd: unrelatedCwd },
+      );
+      expect(
+        findUsableGitCheckoutRoot(unrelatedCwd, {
+          GIT_DIR: path.join(metadataSource, ".git"),
+        }),
+      ).toBe(workTree);
+      expect(findUsableGitCheckoutRoot(unrelatedCwd, { GIT_DIR: gitDir })).toBeNull();
+      expect(findUsableGitCheckoutRoot(metadataSource, { GIT_WORK_TREE: workTree })).toBe(workTree);
     });
   });
 });

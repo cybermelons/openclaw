@@ -163,4 +163,23 @@ describe("sessions.workspace.status RPC handler", () => {
     expect(payload.gitCheckout).toBe(true);
     expect(hoisted.runGit).not.toHaveBeenCalled();
   });
+
+  it("honors a non-bare GIT_DIR without an explicit worktree", async () => {
+    const metadataSource = path.join(workspaceRoot, "metadata-source");
+    fs.mkdirSync(metadataSource);
+    const gitInit = await import("node:child_process").then(({ execFileSync }) =>
+      execFileSync("git", ["init", "--quiet"], { cwd: metadataSource }),
+    );
+    expect(gitInit).toBeInstanceOf(Buffer);
+    vi.stubEnv("GIT_DIR", path.join(metadataSource, ".git"));
+
+    const payload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.workspace.status", {
+        sessionKey: "agent:main:main",
+      }),
+    );
+
+    expect(payload.gitCheckout).toBe(true);
+    expect(hoisted.runGit).not.toHaveBeenCalled();
+  });
 });

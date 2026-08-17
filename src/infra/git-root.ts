@@ -84,42 +84,100 @@ function resolveCommonGitDir(
   }
 }
 
-function resolveExplicitGitCheckout(
-  startDir: string,
-  env: NodeJS.ProcessEnv,
-): { gitDir: string; repoRoot: string } | null {
-  const gitDir = env.GIT_DIR?.trim();
-  const workTree = env.GIT_WORK_TREE?.trim();
-  if (!gitDir || !workTree) {
+type ResolvedGitCheckout = {
+  gitDir: string;
+  repoRoot: string;
+  requiresNonBareGitDir: boolean;
+};
+
+function resolveGitCheckout(startDir: string, env: NodeJS.ProcessEnv): ResolvedGitCheckout | null {
+  const explicitGitDir = env.GIT_DIR?.trim();
+  const explicitWorkTree = env.GIT_WORK_TREE?.trim();
+  const markerRoot = explicitGitDir
+    ? null
+    : findGitRoot(startDir, { maxDepth: Number.MAX_SAFE_INTEGER });
+  const gitDir = explicitGitDir
+    ? path.resolve(startDir, explicitGitDir)
+    : markerRoot
+      ? resolveGitDirFromMarker(markerRoot)
+      : null;
+  if (!gitDir) {
+    return null;
+  }
+  const repoRoot = explicitWorkTree
+    ? path.resolve(startDir, explicitWorkTree)
+    : explicitGitDir
+      ? path.resolve(startDir)
+      : markerRoot;
+  if (!repoRoot) {
     return null;
   }
   return {
-    gitDir: path.resolve(startDir, gitDir),
-    repoRoot: path.resolve(startDir, workTree),
+    gitDir,
+    repoRoot,
+    requiresNonBareGitDir: Boolean(explicitGitDir && !explicitWorkTree),
   };
+}
+
+function readCoreRepositoryConfig(commonGitDir: string): {
+  bare: boolean;
+  workTree?: string;
+} {
+  try {
+    const raw = fs.readFileSync(path.join(commonGitDir, "config"), "utf-8");
+    let inCoreSection = false;
+    let bare = false;
+    let workTree: string | undefined;
+    for (const line of raw.split(/\r?\n/)) {
+      const section = line.match(/^\s*\[([^\]]+)]/);
+      if (section) {
+        inCoreSection = section[1]?.trim().toLowerCase() === "core";
+        continue;
+      }
+      if (!inCoreSection) {
+        continue;
+      }
+      const bareSetting = line.match(/^\s*bare(?:\s*=\s*([^#;]*))?\s*(?:[#;].*)?$/i);
+      if (bareSetting) {
+        const value = bareSetting[1]?.trim().toLowerCase();
+        bare = value === undefined || ["1", "on", "true", "yes"].includes(value);
+        continue;
+      }
+      const configuredWorkTree = line.match(/^\s*worktree\s*=\s*([^#;]+?)\s*(?:[#;].*)?$/i);
+      if (configuredWorkTree?.[1]) {
+        const value = configuredWorkTree[1].trim();
+        workTree = value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
+      }
+    }
+    return { bare, ...(workTree ? { workTree } : {}) };
+  } catch {
+    return { bare: false };
+  }
 }
 
 export function findUsableGitCheckoutRoot(
   startDir: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
-  const explicit = resolveExplicitGitCheckout(startDir, env);
-  const repoRoot =
-    explicit?.repoRoot ?? findGitRoot(startDir, { maxDepth: Number.MAX_SAFE_INTEGER });
-  if (!repoRoot) {
+  const checkout = resolveGitCheckout(startDir, env);
+  if (!checkout) {
     return null;
   }
-  const gitDir = explicit?.gitDir ?? resolveGitDirFromMarker(repoRoot);
-  if (!gitDir) {
-    return null;
-  }
-  const commonGitDir = resolveCommonGitDir(gitDir, startDir, env);
+  const commonGitDir = resolveCommonGitDir(checkout.gitDir, startDir, env);
   if (!commonGitDir) {
     return null;
   }
+  const coreConfig = readCoreRepositoryConfig(commonGitDir);
+  if (checkout.requiresNonBareGitDir && coreConfig.bare) {
+    return null;
+  }
+  const repoRoot =
+    checkout.requiresNonBareGitDir && coreConfig.workTree
+      ? path.resolve(checkout.gitDir, coreConfig.workTree)
+      : checkout.repoRoot;
   try {
     const usable =
-      fs.statSync(path.join(gitDir, "HEAD")).isFile() &&
+      fs.statSync(path.join(checkout.gitDir, "HEAD")).isFile() &&
       fs.statSync(path.join(commonGitDir, "objects")).isDirectory() &&
       fs.statSync(path.join(commonGitDir, "refs")).isDirectory();
     return usable ? repoRoot : null;

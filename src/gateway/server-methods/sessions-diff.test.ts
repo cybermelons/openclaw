@@ -202,6 +202,24 @@ describe("loadSessionDiff", () => {
     ]);
   });
 
+  it("loads diffs with a non-bare GIT_DIR and the session cwd as worktree", async () => {
+    externalGitDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-git-dir-")),
+    );
+    execFileSync("git", ["init", "--quiet"], { cwd: externalGitDir });
+    vi.stubEnv("GIT_DIR", path.join(externalGitDir, ".git"));
+    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "GIT_DIR worktree\n");
+    mockSession(repoRoot);
+
+    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
+
+    expect(result.unavailableReason).toBeUndefined();
+    expect(result.root).toBe(repoRoot);
+    expect(result.files).toEqual([
+      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
+    ]);
+  });
+
   it("uses the persisted fixed-store owner for a bare session checkout", async () => {
     initRepo(repoRoot);
     fs.writeFileSync(path.join(repoRoot, "owned.txt"), "ops\n");
