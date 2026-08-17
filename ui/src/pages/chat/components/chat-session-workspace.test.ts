@@ -60,12 +60,8 @@ describe("session workspace state", () => {
       expect(createSessionWorkspaceProps(state).onOpenDiff).toBeTypeOf("function"),
     );
   });
-  it("keeps the older-gateway diff action hidden for a non-git workspace", async () => {
-    const listFiles = vi.fn().mockResolvedValue({
-      sessionKey: "agent:main:current",
-      gitCheckout: false,
-      files: [],
-    });
+  it("does not load session files for a collapsed older Gateway", async () => {
+    const listFiles = vi.fn();
     const state = {
       agentsList: { agents: [{ id: "main" }], defaultId: "main" },
       client: { request: vi.fn().mockResolvedValue({ artifacts: [] }) },
@@ -78,7 +74,8 @@ describe("session workspace state", () => {
     } as unknown as SessionWorkspaceHost;
 
     expect(createSessionWorkspaceProps(state).onOpenDiff).toBeUndefined();
-    await vi.waitFor(() => expect(listFiles).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(listFiles).not.toHaveBeenCalled();
     expect(createSessionWorkspaceProps(state).onOpenDiff).toBeUndefined();
   });
   it("does not let an older collapsed status overwrite an expanded workspace result", async () => {
