@@ -43,7 +43,7 @@ it("shares a stable missing route across owners until its retry window expires",
   third.reset();
 });
 
-it("keeps a pending route when its release races with a cached miss", async () => {
+it("keeps a pending stable-miss route across the consumer handoff task", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
   let finishRequest: ((response: Response) => void) | undefined;
@@ -58,15 +58,19 @@ it("keeps a pending route when its release races with a cached miss", async () =
   const first = new AuthenticatedAvatarRouteLoader(vi.fn(), { cacheNotFound: true });
   expect(first.resolve("/avatar/release-race", ["token"])).toBeNull();
   first.reset();
+
+  const second = new AuthenticatedAvatarRouteLoader(vi.fn(), { cacheNotFound: true });
+  expect(second.resolve("/avatar/release-race", ["token"])).toBeNull();
   await vi.advanceTimersByTimeAsync(0);
   finishRequest?.({ ok: false, status: 404 } as Response);
   await Promise.resolve();
   await Promise.resolve();
 
-  const second = new AuthenticatedAvatarRouteLoader(vi.fn(), { cacheNotFound: true });
-  expect(second.resolve("/avatar/release-race", ["token"])).toBeNull();
+  const third = new AuthenticatedAvatarRouteLoader(vi.fn(), { cacheNotFound: true });
+  expect(third.resolve("/avatar/release-race", ["token"])).toBeNull();
   expect(fetchMock).toHaveBeenCalledOnce();
   second.reset();
+  third.reset();
 });
 
 it("bounds released missing routes while preserving the newest cooldown", async () => {
@@ -100,7 +104,7 @@ it("bounds released missing routes while preserving the newest cooldown", async 
   reuseNewest.reset();
 });
 
-it("bounds released pending routes while preserving the newest requests", async () => {
+it("aborts a pending stable-miss route after its last consumer leaves", async () => {
   vi.useFakeTimers();
   const signals: AbortSignal[] = [];
   vi.stubGlobal(
@@ -118,21 +122,19 @@ it("bounds released pending routes while preserving the newest requests", async 
       });
     }) as unknown as typeof fetch,
   );
-  const loaders = Array.from(
-    { length: 129 },
-    () => new AuthenticatedAvatarRouteLoader(vi.fn(), { cacheNotFound: true }),
-  );
+  const first = new AuthenticatedAvatarRouteLoader(vi.fn(), { cacheNotFound: true });
+  expect(first.resolve("/avatar/pending", ["token"])).toBeNull();
+  first.reset();
 
-  for (const [index, loader] of loaders.entries()) {
-    expect(loader.resolve(`/avatar/pending-${String(index)}`, ["token"])).toBeNull();
-    loader.reset();
-  }
-
-  expect(signals).toHaveLength(129);
+  expect(signals[0]?.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(0);
   expect(signals[0]?.aborted).toBe(true);
-  expect(signals.slice(1).every((signal) => !signal.aborted)).toBe(true);
 
-  await vi.advanceTimersByTimeAsync(30_000);
+  const second = new AuthenticatedAvatarRouteLoader(vi.fn(), { cacheNotFound: true });
+  expect(second.resolve("/avatar/pending", ["token"])).toBeNull();
+  expect(signals).toHaveLength(2);
+  second.reset();
+  await vi.advanceTimersByTimeAsync(0);
 });
 
 it("shares pending fetches and revokes the resolved blob on reset", async () => {

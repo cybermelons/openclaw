@@ -30,11 +30,7 @@ function deleteAvatarRouteEntry(key: string, entry: AvatarRouteEntry) {
 }
 
 function isUnownedCacheEntry(entry: AvatarRouteEntry): boolean {
-  return (
-    entry.cacheNotFound &&
-    entry.consumers.size === 0 &&
-    (entry.pending || entry.notFoundUntilMs !== undefined)
-  );
+  return entry.cacheNotFound && entry.consumers.size === 0 && entry.notFoundUntilMs !== undefined;
 }
 
 function trimUnownedCacheEntries(protectedEntry: AvatarRouteEntry) {
@@ -76,14 +72,13 @@ function releaseEntry(key: string, owner: symbol) {
   if (entry.consumers.size > 0 || entry.releaseTimer !== undefined) {
     return;
   }
-  if (entry.pending && entry.cacheNotFound) {
-    trimUnownedCacheEntries(entry);
-    return;
-  }
   scheduleEntryRelease(key, entry);
 }
 
 function scheduleEntryRelease(key: string, entry: AvatarRouteEntry) {
+  if (entry.releaseTimer !== undefined) {
+    return;
+  }
   // Lit can replace one route consumer with another in a later microtask. Finalize
   // unowned routes on the next task so the shared request survives that DOM handoff.
   const releaseDelayMs = entry.notFoundUntilMs
@@ -91,11 +86,7 @@ function scheduleEntryRelease(key: string, entry: AvatarRouteEntry) {
     : 0;
   entry.releaseTimer = setTimeout(() => {
     entry.releaseTimer = undefined;
-    if (
-      sharedAvatarRoutes.get(key) !== entry ||
-      entry.consumers.size > 0 ||
-      (entry.pending && entry.cacheNotFound)
-    ) {
+    if (sharedAvatarRoutes.get(key) !== entry || entry.consumers.size > 0) {
       return;
     }
     if (entry.notFoundUntilMs && Date.now() < entry.notFoundUntilMs) {
