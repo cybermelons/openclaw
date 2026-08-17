@@ -9,14 +9,15 @@ import { NonEmptyString, SessionLabelString } from "./primitives.js";
 import { SessionsCreateParamsSchema } from "./sessions-create.js";
 import { SessionsRecoverParamsSchema, SessionsRecoverResultSchema } from "./sessions-recover.js";
 import { SessionOwnerSchema } from "./sessions-row.js";
-import {
+export {
   SessionsWorkspaceStatusParamsSchema,
   SessionsWorkspaceStatusResultSchema,
+  type SessionsWorkspaceStatusParams,
+  type SessionsWorkspaceStatusResult,
 } from "./sessions-workspace-status.js";
 
 export { SessionsCreateParamsSchema };
 export { SessionsRecoverParamsSchema, SessionsRecoverResultSchema };
-export { SessionsWorkspaceStatusParamsSchema, SessionsWorkspaceStatusResultSchema };
 export { SessionsResolveParamsSchema, type SessionsResolveParams } from "./sessions-resolve.js";
 export {
   SESSIONS_PATCH_MANY_MAX_TARGETS,
@@ -909,8 +910,6 @@ export type SessionFileRelevance = Static<typeof SessionFileRelevanceSchema>;
 export type SessionFileEntry = Static<typeof SessionFileEntrySchema>;
 export type SessionFileBrowserEntry = Static<typeof SessionFileBrowserEntrySchema>;
 export type SessionFileBrowserResult = Static<typeof SessionFileBrowserResultSchema>;
-export type SessionsWorkspaceStatusParams = Static<typeof SessionsWorkspaceStatusParamsSchema>;
-export type SessionsWorkspaceStatusResult = Static<typeof SessionsWorkspaceStatusResultSchema>;
 export type SessionsFilesListParams = Static<typeof SessionsFilesListParamsSchema>;
 export type SessionsFilesListResult = Static<typeof SessionsFilesListResultSchema>;
 export type SessionsFilesGetParams = Static<typeof SessionsFilesGetParamsSchema>;

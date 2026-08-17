@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
 import { closedObject } from "./closed-object.js";
 import { NonEmptyString } from "./primitives.js";
 
@@ -14,3 +14,6 @@ export const SessionsWorkspaceStatusResultSchema = closedObject({
   root: Type.Optional(NonEmptyString),
   gitCheckout: Type.Optional(Type.Boolean()),
 });
+
+export type SessionsWorkspaceStatusParams = Static<typeof SessionsWorkspaceStatusParamsSchema>;
+export type SessionsWorkspaceStatusResult = Static<typeof SessionsWorkspaceStatusResultSchema>;
