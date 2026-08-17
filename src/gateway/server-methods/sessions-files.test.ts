@@ -237,7 +237,7 @@ describe("sessions.files RPC handlers", () => {
     expect(hoisted.execOpenPath).not.toHaveBeenCalled();
   });
 
-  it("withholds the workspace root of an exec-node session", () => {
+  it("withholds workspace status and root for an exec-node session", async () => {
     // Workspace identity surfaces read this root. An exec-node session's
     // directory lives on another host, while the precedence below it falls back
     // to the local agent workspace — handing that back would name this machine.
@@ -248,6 +248,13 @@ describe("sessions.files RPC handlers", () => {
       entry: { sessionId: "sess-main", sessionFile: "sess-main.jsonl", execNode: "build-mac" },
     });
     expect(resolveLocalSessionWorkspaceRoot({ sessionKey: "agent:main:main" })).toBeUndefined();
+    expect(
+      expectOkPayload(
+        await invokeSessionFilesHandler("sessions.workspace.status", {
+          sessionKey: "agent:main:main",
+        }),
+      ),
+    ).toEqual({ sessionKey: "agent:main:main" });
 
     hoisted.loadSessionEntry.mockReturnValue({
       canonicalKey: "agent:main:main",

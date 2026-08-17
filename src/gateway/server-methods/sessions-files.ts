@@ -569,6 +569,9 @@ async function buildWorkspaceStatus(params: {
   agentId?: string;
 }): Promise<SessionsWorkspaceStatusResult> {
   const loaded = loadSessionFileRoot(params);
+  if (loaded.entry?.execNode) {
+    return { sessionKey: params.sessionKey };
+  }
   const gitCheckout = await loadGitCheckoutStatus(loaded.diffCwd);
   return {
     sessionKey: params.sessionKey,
