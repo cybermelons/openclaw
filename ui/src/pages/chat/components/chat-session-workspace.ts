@@ -75,14 +75,13 @@ type SessionWorkspaceState = {
   checkoutRequestId: number;
   dock: ChatWorkspaceDock;
   error: string | null;
-  gitCheckout: boolean | null;
+  gitCheckout?: boolean | null;
   list: SessionWorkspaceListResult | null;
   loading: boolean;
   pendingReload: boolean;
   pendingStatusReload: boolean;
   requestId: number;
   sessionKey: string;
-  statusLoaded: boolean;
   statusLoading: boolean;
   statusRequestId: number;
 };
@@ -170,14 +169,12 @@ function getWorkspaceState(state: SessionWorkspaceHost): SessionWorkspaceState {
     // per-session state just carries it forward.
     dock: current?.dock ?? normalizeChatWorkspaceDock(state.settings?.chatWorkspaceDock),
     error: null,
-    gitCheckout: null,
     list: null,
     loading: false,
     pendingReload: false,
     pendingStatusReload: false,
     requestId: 0,
     sessionKey,
-    statusLoaded: false,
     statusLoading: false,
     statusRequestId: 0,
   };
@@ -369,7 +366,6 @@ function loadWorkspace(
       const browserItems = files?.browser?.entries ?? [];
       if (current.checkoutRequestId === checkoutRequestId) {
         current.gitCheckout = files?.gitCheckout ?? null;
-        current.statusLoaded = true;
       }
       const gitCheckout = current.gitCheckout;
       current.list = {
@@ -442,9 +438,8 @@ function loadWorkspaceStatus(
         return;
       }
       current.gitCheckout = result.gitCheckout ?? null;
-      current.statusLoaded = true;
     })
-    .catch((error) => {
+    .catch((error: unknown) => {
       const current = currentWorkspaceState(state);
       if (
         current === workspace &&
@@ -453,7 +448,6 @@ function loadWorkspaceStatus(
       ) {
         current.error = formatUiError(error);
         current.gitCheckout = false;
-        current.statusLoaded = true;
       }
     })
     .finally(() => {
@@ -791,7 +785,7 @@ export function createSessionWorkspaceProps(
     state.connected &&
     state.agentsList &&
     !workspace.statusLoading &&
-    !workspace.statusLoaded
+    workspace.gitCheckout === undefined
   ) {
     loadWorkspaceStatus(state, workspace);
   }
@@ -846,7 +840,7 @@ export function resolveSessionDiffSidebarContent(
   const canOpenDiff =
     isGatewayMethodAdvertised(state, "sessions.diff") === true &&
     Boolean(state.client) &&
-    workspace.statusLoaded &&
+    workspace.gitCheckout !== undefined &&
     workspace.gitCheckout !== false;
   if (!canOpenDiff) {
     return null;

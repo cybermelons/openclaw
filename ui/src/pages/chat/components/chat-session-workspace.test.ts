@@ -126,7 +126,6 @@ describe("session workspace state", () => {
       expect(state.sessionWorkspaceState).toMatchObject({
         gitCheckout: true,
         loading: false,
-        statusLoaded: true,
       }),
     );
     expect(createSessionWorkspaceProps(state, { expanded: true }).onOpenDiff).toBeTypeOf(
