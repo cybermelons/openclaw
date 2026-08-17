@@ -375,7 +375,7 @@ describe("AppSidebar session catalog pagination", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       gateway.publishEvent("presence", {
-        presence: [{ deviceId: "node-1", reason: "connect" }],
+        presence: [{ deviceId: "node-1", roles: ["node"], reason: "connect" }],
       });
       await vi.advanceTimersByTimeAsync(50);
 

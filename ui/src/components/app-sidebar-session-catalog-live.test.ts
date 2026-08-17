@@ -26,4 +26,12 @@ describe("SessionCatalogLiveState presence refreshes", () => {
       }),
     ).toBe(true);
   });
+
+  it("accepts a mode-less presence entry with an authenticated node role", () => {
+    const live = new SessionCatalogLiveState();
+
+    expect(live.observePresence({ presence: [{ deviceId: "legacy-node", roles: ["node"] }] })).toBe(
+      true,
+    );
+  });
 });
