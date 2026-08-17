@@ -259,7 +259,53 @@ describe("cli-session helpers", () => {
         authEpochVersion: 2,
         mcpConfigHash: "mcp-hash",
       }),
-    ).toEqual({ mode: "invalidate", invalidatedReason: "mcp" });
+    ).toEqual({
+      mode: "reuse-with-drift",
+      sessionId: "legacy-session",
+      drift: { reasons: ["mcp"] },
+    });
+  });
+
+  it("resumes across MCP topology changes so restarts keep conversation history", () => {
+    // Regression: a gateway restart that loads a different plugin/MCP set used to
+    // invalidate the binding, so the next turn spawned a fresh CLI session and the
+    // operator's chat answered with no prior context.
+    const binding = {
+      sessionId: "cli-session-1",
+      authProfileId: "anthropic:work",
+      authEpoch: "auth-epoch-a",
+      authEpochVersion: 2,
+      mcpConfigHash: "mcp-config-a",
+      mcpResumeHash: "mcp-resume-a",
+    };
+
+    expect(
+      resolveCliSessionReuse({
+        binding,
+        authProfileId: "anthropic:work",
+        authEpoch: "auth-epoch-a",
+        authEpochVersion: 2,
+        mcpConfigHash: "mcp-config-b",
+        mcpResumeHash: "mcp-resume-b",
+      }),
+    ).toEqual({
+      mode: "reuse-with-drift",
+      sessionId: "cli-session-1",
+      drift: { reasons: ["mcp"] },
+    });
+
+    // Mechanical identity changes still invalidate: only tool topology softened.
+    // A differing auth epoch keeps the versioned-epoch escape hatch from matching.
+    expect(
+      resolveCliSessionReuse({
+        binding,
+        authProfileId: "anthropic:personal",
+        authEpoch: "auth-epoch-b",
+        authEpochVersion: 2,
+        mcpConfigHash: "mcp-config-a",
+        mcpResumeHash: "mcp-resume-a",
+      }),
+    ).toEqual({ mode: "invalidate", invalidatedReason: "auth-profile" });
   });
 
   it("invalidates reuse when stored auth profile or prompt shape changes", () => {
@@ -330,7 +376,11 @@ describe("cli-session helpers", () => {
         extraSystemPromptHash: "prompt-a",
         mcpConfigHash: "mcp-b",
       }),
-    ).toEqual({ mode: "invalidate", invalidatedReason: "mcp" });
+    ).toEqual({
+      mode: "reuse-with-drift",
+      sessionId: "cli-session-1",
+      drift: { reasons: ["mcp"] },
+    });
   });
 
   it("keeps content-drift bindings reusable for queued turns until hashes refresh", () => {
@@ -567,7 +617,11 @@ describe("cli-session helpers", () => {
         mcpConfigHash: "mcp-config-a",
         mcpResumeHash: "mcp-resume-b",
       }),
-    ).toEqual({ mode: "invalidate", invalidatedReason: "mcp" });
+    ).toEqual({
+      mode: "reuse-with-drift",
+      sessionId: "cli-session-1",
+      drift: { reasons: ["mcp"] },
+    });
   });
 
   it("falls back to legacy MCP config hashes when stored resume hashes are absent", () => {
@@ -601,7 +655,11 @@ describe("cli-session helpers", () => {
         mcpConfigHash: "mcp-config-b",
         mcpResumeHash: "mcp-resume-a",
       }),
-    ).toEqual({ mode: "invalidate", invalidatedReason: "mcp" });
+    ).toEqual({
+      mode: "reuse-with-drift",
+      sessionId: "cli-session-1",
+      drift: { reasons: ["mcp"] },
+    });
   });
 
   it("clears provider-scoped and global CLI session state", () => {
@@ -643,7 +701,9 @@ describe("cli-session helpers", () => {
       true,
     );
     expect(resolveCliSessionClearReason(failover)).toBe("session_expired");
-    expect(shouldClearFailedCliSessionBinding({ error: abort, binding })).toBe(true);
+    // Pressing stop must never destroy the conversation: the transcript is written
+    // incrementally and stays resumable, so the binding survives an aborted turn.
+    expect(shouldClearFailedCliSessionBinding({ error: abort, binding })).toBe(false);
     expect(shouldClearFailedCliSessionBinding({ error: abort, binding: forkBinding })).toBe(false);
     expect(
       shouldClearFailedCliSessionBinding({
@@ -657,5 +717,23 @@ describe("cli-session helpers", () => {
       shouldClearFailedCliSessionBinding({ error: new Error("provider failed"), binding }),
     ).toBe(false);
     expect(shouldClearFailedCliSessionBinding({ error: failover })).toBe(false);
+  });
+
+  it("keeps the CLI binding when an operator stops a turn mid-generation", () => {
+    // Regression: stop -> AbortError -> binding cleared meant the next message found
+    // no session to resume, spawned a fresh CLI session, and the chat lost all history.
+    // Interrupting a bad answer to retry is a normal action, not a corruption signal.
+    const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
+    const binding = { sessionId: "cli-session-1" };
+
+    expect(shouldClearFailedCliSessionBinding({ error: abort, binding })).toBe(false);
+
+    // Only proven-unusable sessions still clear.
+    const failover = new FailoverError("session expired", {
+      reason: "session_expired",
+      provider: "claude-cli",
+      model: "claude-opus-4-8",
+    });
+    expect(shouldClearFailedCliSessionBinding({ error: failover, binding })).toBe(true);
   });
 });

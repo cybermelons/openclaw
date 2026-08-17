@@ -684,6 +684,62 @@ describe("loadCliSessionReseedMessages", () => {
     }
   });
 
+  it("reseeds a bindingless session so a chat with no CLI session keeps its history", async () => {
+    // Regression: a turn with no CLI session to resume produced no reseed reason, so
+    // the loader read the transcript and then discarded it. The chat answered as if it
+    // had just started even though its full history was stored.
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-cli-state-"));
+    const sessionFile = createSessionTranscript({
+      rootDir: stateDir,
+      sessionId: "session-bindingless",
+      messages: ["earlier turn", "later turn"],
+    });
+
+    try {
+      await withCliSessionState(stateDir, async () => {
+        const reseed = await loadCliSessionReseedMessages({
+          sessionId: "session-bindingless",
+          sessionFile,
+          sessionKey: "agent:main:main",
+          agentId: "main",
+          allowRawTranscriptReseed: true,
+          rawTranscriptReseedReason: "no-cli-session",
+        });
+        expect(reseed.length).toBeGreaterThan(0);
+        expectMessageFields(reseed[0], { role: "user", content: "earlier turn" });
+      });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reseeds nothing for a bindingless session that has no prior history", async () => {
+    // The other half of the original intent: a genuinely new chat must stay clean.
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-cli-state-"));
+    const sessionFile = createSessionTranscript({
+      rootDir: stateDir,
+      sessionId: "session-bindingless-empty",
+      messages: [],
+    });
+
+    try {
+      await withCliSessionState(stateDir, async () => {
+        expect(
+          await loadCliSessionReseedMessages({
+            sessionId: "session-bindingless-empty",
+            sessionFile,
+            sessionKey: "agent:main:main",
+            agentId: "main",
+            allowRawTranscriptReseed: true,
+            rawTranscriptReseedReason: "no-cli-session",
+          }),
+        ).toStrictEqual([]);
+      });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("reseeds safe invalidated sessions from a bounded raw message tail when explicitly opted in", async () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-cli-state-"));
     const sessionFile = createSessionTranscript({

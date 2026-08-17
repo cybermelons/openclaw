@@ -241,6 +241,17 @@ const STALE_STORE_ONLY_CHILD_LINK_MS = 60 * 60 * 1_000;
 
 const SINGLE_ROW_CONTEXT_CACHE_MAX_ENTRIES = 64;
 
+/**
+ * Cron run keys (`agent:<id>:cron:<jobId>:run:<runId>`) name one execution and are
+ * never persisted as session rows. Children spawned by a run record the run key as
+ * their parent, so indexing them under it matches no listed row and each child
+ * surfaces as its own root entry instead of nesting. Collapse to the durable job key.
+ */
+export function collapseCronRunSessionKey(sessionKey: string): string {
+  const runIndex = sessionKey.indexOf(":run:");
+  return runIndex > 0 && sessionKey.includes(":cron:") ? sessionKey.slice(0, runIndex) : sessionKey;
+}
+
 export function isFinitePositiveTimestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -298,7 +309,9 @@ function buildStoreChildSessionCandidateIndex(
     const parentKeys = [
       normalizeOptionalString(entry.spawnedBy),
       normalizeOptionalString(entry.parentSessionKey),
-    ].filter((value): value is string => Boolean(value) && value !== key);
+    ]
+      .map((value) => (value ? collapseCronRunSessionKey(value) : value))
+      .filter((value): value is string => Boolean(value) && value !== key);
     for (const parentKey of parentKeys) {
       addChildSessionKey(childSessionsByKey, parentKey, key);
     }
@@ -422,7 +435,9 @@ export function buildStoreChildSessionIndex(
     const parentKeys = [
       normalizeOptionalString(entry.spawnedBy),
       normalizeOptionalString(entry.parentSessionKey),
-    ].filter((value): value is string => Boolean(value) && value !== key);
+    ]
+      .map((value) => (value ? collapseCronRunSessionKey(value) : value))
+      .filter((value): value is string => Boolean(value) && value !== key);
     if (parentKeys.length === 0) {
       continue;
     }

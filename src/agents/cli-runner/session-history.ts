@@ -11,6 +11,7 @@ import {
   resolveSessionFilePathCore,
   resolveSessionFilePathOptions,
 } from "../../config/sessions/paths.js";
+import { readSessionTranscriptMessageEvents } from "../../config/sessions/session-accessor.sqlite-active-events.js";
 import {
   parseSessionTranscriptTreeEntry,
   scanSessionTranscriptTree,
@@ -64,7 +65,7 @@ type HistoryEntry = {
   tokensAfter?: unknown;
 };
 
-type RawTranscriptReseedReason =
+export type RawTranscriptReseedReason =
   | "auth-profile"
   | "auth-epoch"
   | "message-policy"
@@ -72,11 +73,17 @@ type RawTranscriptReseedReason =
   | "cwd"
   | "mcp"
   | "missing-transcript"
+  | "no-cli-session"
   | "orphaned-tool-use"
   | "session-expired";
 
 const RAW_TRANSCRIPT_RESEED_ALLOWED_REASONS = new Set<RawTranscriptReseedReason>([
   "missing-transcript",
+  // No CLI session to resume, so the OpenClaw transcript is the only copy of the
+  // conversation. An explicit reset truncates that transcript at the reset boundary
+  // (projectLatestCliHistoryBoundary), so a deliberate fresh start stays fresh, and a
+  // genuinely new chat reseeds nothing because its history is empty.
+  "no-cli-session",
   "orphaned-tool-use",
   "message-policy",
   "system-prompt",
@@ -474,6 +481,42 @@ function resolveSafeCliSessionFile(params: {
   };
 }
 
+/**
+ * Reads transcript entries from the canonical SQLite store. Returns undefined only
+ * when the store holds nothing for this session, so callers fall through to the
+ * legacy filesystem reader.
+ *
+ * Deliberately does not gate on the `sqlite:` sessionFile sentinel: entries written
+ * after the SQLite migration usually carry no `sessionFile` at all, and the path
+ * resolver then derives a .jsonl path that never exists. Gating on the sentinel
+ * silently skipped the store for exactly the sessions that live in it.
+ */
+function readSqliteCliSessionEntries(params: {
+  sessionId: string;
+  sessionFile: string;
+  sessionKey?: string;
+  agentId?: string;
+}): unknown[] | undefined {
+  try {
+    const rows = readSessionTranscriptMessageEvents({
+      sessionId: params.sessionId,
+      ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+      ...(params.agentId ? { agentId: params.agentId } : {}),
+    });
+    // Store rows are {event, seq} envelopes; downstream projection expects the bare
+    // transcript entries the file reader yields, so unwrap before returning.
+    const entries = rows.flatMap((row) => {
+      const event = isRecord(row) ? row.event : undefined;
+      return event === undefined ? [] : [event];
+    });
+    return entries.length > 0 ? entries : undefined;
+  } catch (error) {
+    // Never break history loading on a store read; fall through to the file reader.
+    cliBackendLog.warn(`sqlite cli session history read failed: ${formatErrorMessage(error)}`);
+    return undefined;
+  }
+}
+
 async function loadCliSessionEntries(params: {
   sessionId: string;
   sessionFile: string;
@@ -483,6 +526,17 @@ async function loadCliSessionEntries(params: {
 }): Promise<unknown[]> {
   try {
     const { sessionFile, sessionsDir } = resolveSafeCliSessionFile(params);
+    // SQLite-backed sessions carry a `sqlite:` sentinel instead of a real path, so the
+    // filesystem walk below lstat()s a non-path, throws ENOENT, and returns no history
+    // through the silent catch. Read the canonical store first: without this, resuming
+    // a session whose transcript lives only in SQLite reseeds nothing, and the chat
+    // starts cold even though its full history is present.
+    const sqliteEntries = readSqliteCliSessionEntries(params);
+    if (sqliteEntries) {
+      return projectLatestCliHistoryBoundary(
+        selectSessionTranscriptLeafControlledPath(sqliteEntries) ?? sqliteEntries,
+      );
+    }
     const entryStat = await fsp.lstat(sessionFile);
     if (!entryStat.isFile() || entryStat.isSymbolicLink()) {
       return [];
@@ -568,7 +622,7 @@ function projectLatestCliHistoryBoundary(entries: unknown[]): unknown[] {
   return [...kept, ...entries.slice(boundaryIndex + 1)];
 }
 
-/** Checks whether a safe, bounded transcript file exists for a CLI session. */
+/** Checks whether a safe, bounded transcript exists for a CLI session. */
 export async function hasCliSessionTranscript(params: {
   sessionId: string;
   sessionFile: string;
@@ -578,6 +632,12 @@ export async function hasCliSessionTranscript(params: {
 }): Promise<boolean> {
   try {
     const { sessionFile, sessionsDir } = resolveSafeCliSessionFile(params);
+    // Same sentinel branch as the loader: a SQLite-backed session has no file, so the
+    // filesystem probe below would report "no transcript" for a session that has one.
+    const sqliteEntries = readSqliteCliSessionEntries(params);
+    if (sqliteEntries) {
+      return sqliteEntries.length > 0;
+    }
     const entryStat = await fsp.lstat(sessionFile);
     if (!entryStat.isFile() || entryStat.isSymbolicLink()) {
       return false;

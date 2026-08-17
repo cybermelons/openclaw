@@ -144,6 +144,24 @@ describe("UI session identity", () => {
       expected: "agent:main:controller",
     },
     { parentSessionKey: null, spawnedBy: "  ", expected: undefined },
+    {
+      // Cron run keys are ephemeral and never stored as rows, so a subagent parented
+      // to a run had no locatable parent and fell back to a root sidebar entry.
+      parentSessionKey: "agent:main:cron:job-1:run:run-1",
+      spawnedBy: null,
+      expected: "agent:main:cron:job-1",
+    },
+    {
+      parentSessionKey: null,
+      spawnedBy: "agent:main:cron:job-1:run:run-1",
+      expected: "agent:main:cron:job-1",
+    },
+    {
+      // Non-cron keys never collapse, even if a ":run:" segment appears.
+      parentSessionKey: "agent:main:dashboard:run:abc",
+      spawnedBy: null,
+      expected: "agent:main:dashboard:run:abc",
+    },
   ])("resolves the first non-empty navigation parent", ({ expected, ...row }) => {
     expect(resolveUiSessionNavigationParentKey(row)).toBe(expected);
   });

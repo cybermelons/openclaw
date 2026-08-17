@@ -897,6 +897,9 @@ export function runAgentAttempt(params: {
       return cliSessionBinding;
     };
     const mediaTaskIdsBefore = getGeneratedMediaTaskIdsForSessionKey(params.sessionKey);
+    // Set once a fork successor is persisted but not yet finalized, so the failure
+    // path can tell "bound to a half-created session" from "operator pressed stop".
+    let boundUnfinishedForkSuccessor = false;
     const runCliWithSession = async (
       nextCliSessionId: string | undefined,
       activeCliSessionBinding = cliSessionBinding,
@@ -989,6 +992,9 @@ export function runAgentAttempt(params: {
                       throw new Error("CLI session fork successor could not be persisted");
                     }
                     params.sessionEntry = persisted;
+                    // The entry now points at a successor this turn still has to
+                    // finalize; if the turn fails first, that binding is unusable.
+                    boundUnfinishedForkSuccessor = true;
                   },
                 }
               : {}),
@@ -1113,6 +1119,7 @@ export function runAgentAttempt(params: {
               params.sessionKey,
               mediaTaskIdsBefore,
             ),
+            boundUnfinishedForkSuccessor,
           }) &&
           failedCliSessionId &&
           mutableCliSessionStore

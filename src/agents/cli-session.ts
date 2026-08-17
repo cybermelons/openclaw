@@ -129,6 +129,8 @@ export function shouldClearFailedCliSessionBinding(params: {
   error: unknown;
   binding?: CliSessionBinding;
   hasNewGeneratedMediaTask?: boolean;
+  /** Set when this turn rebound the entry to a fork successor it never finished. */
+  boundUnfinishedForkSuccessor?: boolean;
 }): boolean {
   if (!normalizeOptionalString(params.binding?.sessionId)) {
     return false;
@@ -137,11 +139,18 @@ export function shouldClearFailedCliSessionBinding(params: {
   if (params.hasNewGeneratedMediaTask === true) {
     return false;
   }
-  if (isFailoverError(params.error)) {
+  // A fork successor persisted but never finalized is a proven-unusable binding: the
+  // entry now points at a half-created session rather than the parent it forked from.
+  if (params.boundUnfinishedForkSuccessor === true) {
     return true;
   }
-  // A pre-successor fork abort keeps its one-shot marker for the next turn.
-  return params.binding?.forkNextResume !== true && readErrorName(params.error) === "AbortError";
+  // Otherwise clear only on proof the session is gone, never on suspicion. A user
+  // pressing stop raises AbortError, but the CLI writes its transcript incrementally,
+  // so history up to that point stays valid and resumable. Clearing on abort destroyed
+  // the whole conversation every time an operator interrupted a bad answer — the one
+  // moment they most expect to retry with context intact. A genuinely torn transcript
+  // is detected and invalidated at the resume boundary that can actually prove it.
+  return isFailoverError(params.error);
 }
 
 /** Stable reason used when recording why a failed reused CLI session was cleared. */
@@ -149,9 +158,9 @@ export function resolveCliSessionClearReason(error: unknown): string {
   return isFailoverError(error) ? error.reason : (readErrorName(error) ?? "error");
 }
 
-type CliSessionInvalidatedReason = "auth-profile" | "auth-epoch" | "message-policy" | "cwd" | "mcp";
+type CliSessionInvalidatedReason = "auth-profile" | "auth-epoch" | "message-policy" | "cwd";
 
-type CliSessionContentDriftReason = "system-prompt" | "prompt-tools";
+type CliSessionContentDriftReason = "system-prompt" | "prompt-tools" | "mcp";
 
 export type CliSessionReuseResult =
   | { mode: "none" }
@@ -218,21 +227,26 @@ export function resolveCliSessionReuse(params: {
   if (storedCwdHash !== undefined && storedCwdHash !== currentCwdHash) {
     return { mode: "invalidate", invalidatedReason: "cwd" };
   }
+  const driftReasons: CliSessionContentDriftReason[] = [];
+  // MCP topology drift resumes rather than invalidating: dropping the binding here
+  // silently restarts the CLI session, so the operator's next turn loses all prior
+  // conversation history. Tool availability is re-declared on every resumed turn,
+  // so a changed server set is a content change like the prompt drift below — the
+  // transcript stays usable and the turn notice names what changed.
   const storedMcpResumeHash = normalizeOptionalString(binding?.mcpResumeHash);
   if (storedMcpResumeHash && currentMcpResumeHash) {
     // Resume hashes are stricter than raw MCP config hashes: a match proves the
     // exact resumed CLI tool topology still belongs to this session.
     if (storedMcpResumeHash !== currentMcpResumeHash) {
-      return { mode: "invalidate", invalidatedReason: "mcp" };
+      driftReasons.push("mcp");
     }
   } else {
     const storedMcpConfigHash = normalizeOptionalString(binding?.mcpConfigHash);
     if (storedMcpConfigHash !== currentMcpConfigHash) {
-      return { mode: "invalidate", invalidatedReason: "mcp" };
+      driftReasons.push("mcp");
     }
   }
 
-  const driftReasons: CliSessionContentDriftReason[] = [];
   const storedExtraSystemPromptHash = normalizeOptionalString(binding?.extraSystemPromptHash);
   if (storedExtraSystemPromptHash !== currentExtraSystemPromptHash) {
     driftReasons.push("system-prompt");
