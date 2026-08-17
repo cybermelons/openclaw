@@ -56,10 +56,25 @@ export function parseSessionKeyParts(
     : null;
 }
 
+/**
+ * Cron run keys (`agent:<id>:cron:<jobId>:run:<runId>`) identify one execution and are
+ * never persisted as session rows, so a child parented to a run has no locatable
+ * parent. Collapse to the durable job key the sidebar does show.
+ */
+function collapseEphemeralCronRunKey(parentKey: string): string {
+  const runIndex = parentKey.indexOf(":run:");
+  return runIndex > 0 && parentKey.includes(":cron:") ? parentKey.slice(0, runIndex) : parentKey;
+}
+
 export function resolveUiSessionNavigationParentKey(
   row: { parentSessionKey?: string | null; spawnedBy?: string | null } | null | undefined,
 ): string | undefined {
-  return normalizeOptionalString(row?.parentSessionKey) ?? normalizeOptionalString(row?.spawnedBy);
+  // Subagents spawned by a cron run point at the run, not the job. Without this the
+  // tree cannot find their parent, so every spawned subagent falls back to a root row
+  // and buries real chats under near-identical siblings.
+  const parentKey =
+    normalizeOptionalString(row?.parentSessionKey) ?? normalizeOptionalString(row?.spawnedBy);
+  return parentKey ? collapseEphemeralCronRunKey(parentKey) : undefined;
 }
 
 function normalizeMainKey(value: string | undefined | null): string {

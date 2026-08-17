@@ -137,6 +137,7 @@ import {
   hasCliSessionTranscript,
   loadCliSessionHistoryMessages,
   loadCliSessionReseedMessages,
+  type RawTranscriptReseedReason,
   resolveAutoCliSessionReseedHistoryChars,
 } from "./session-history.js";
 import { buildCliBackendToolAvailability } from "./tool-policy.js";
@@ -226,7 +227,7 @@ function buildCliSessionDriftUserContext(
   if (reusableCliSession.mode !== "reuse-with-drift") {
     return undefined;
   }
-  return `OpenClaw resumed this CLI session after prompt content changed. Follow the current turn's instructions; changed=${reusableCliSession.drift.reasons.join(",")}.`;
+  return `OpenClaw resumed this CLI session after available context changed. Follow the current turn's instructions and the tools available now; changed=${reusableCliSession.drift.reasons.join(",")}.`;
 }
 
 function prependCliSessionDriftUserContext(
@@ -1407,9 +1408,15 @@ export async function prepareCliRunContext(
           : params.cliSessionId
             ? { mode: "reuse", sessionId: params.cliSessionId }
             : { mode: "none" };
-    const backendReusableCliSession: CliReusableSession =
+    // Only prompt-carrying drift needs the system prompt re-sent on resume, so a
+    // backend that cannot transport it must restart the session. MCP-only drift
+    // re-declares tools on the resumed turn instead, and restarting it here would
+    // drop the operator's conversation history for a purely tool-topology change.
+    const driftNeedsSystemPromptTransport =
       reusableCliSessionCandidate.mode === "reuse-with-drift" &&
-      !canTransportSystemPrompt(preparedBackendFinal.backend)
+      reusableCliSessionCandidate.drift.reasons.some((reason) => reason !== "mcp");
+    const backendReusableCliSession: CliReusableSession =
+      driftNeedsSystemPromptTransport && !canTransportSystemPrompt(preparedBackendFinal.backend)
         ? { mode: "invalidate", invalidatedReason: "system-prompt" }
         : reusableCliSessionCandidate;
     const candidateClaudeCliSessionId =
@@ -1613,7 +1620,16 @@ export async function prepareCliRunContext(
     }
     const allowRawTranscriptReseed =
       backendResolved.config.reseedFromRawTranscriptWhenUncompacted === true;
-    const rawTranscriptReseedReason = reusableCliSessionId ? "session-expired" : invalidatedReason;
+    // Three distinct states, not two. A turn with no reusable session AND no
+    // invalidation reason is bindingless: there is no CLI session to resume, so the
+    // OpenClaw transcript is the only surviving copy of the conversation. Leaving the
+    // reason undefined made the loader fetch that history and then discard it, so the
+    // chat answered as if it had just started. This is the same condition as
+    // `missing-transcript` reached without a stale pointer; it keeps its own value so
+    // logs still distinguish "session vanished" from "never bound".
+    const rawTranscriptReseedReason: RawTranscriptReseedReason | undefined = reusableCliSessionId
+      ? "session-expired"
+      : (invalidatedReason ?? "no-cli-session");
     // Node placement keeps this: the history prompt is built from the
     // gateway-side OpenClaw transcript, so a fresh remote CLI session still
     // receives prior conversation context via stdin.

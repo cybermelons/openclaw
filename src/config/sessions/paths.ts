@@ -42,6 +42,15 @@ type SessionFilePathOptions = {
 const MULTI_STORE_PATH_SENTINEL = "(multiple)";
 const SQLITE_TRANSCRIPT_TARGET_PREFIX = "sqlite:";
 
+/**
+ * True when a resolved transcript target names the SQLite store rather than a file.
+ * Readers must branch on this before any filesystem call: the sentinel is not a path,
+ * so stat/realpath on it fails and would be mistaken for "no transcript".
+ */
+export function isSqliteTranscriptTarget(sessionFile: string | undefined): boolean {
+  return typeof sessionFile === "string" && sessionFile.startsWith(SQLITE_TRANSCRIPT_TARGET_PREFIX);
+}
+
 export function resolveSessionFilePathOptions(params: {
   agentId?: string;
   storePath?: string;

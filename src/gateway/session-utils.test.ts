@@ -29,7 +29,7 @@ import type { GatewayModelCatalogSnapshot } from "./server-model-catalog.types.j
 import { registerSessionAutomationSource } from "./session-automation-index.js";
 import { buildGatewaySessionEventFields } from "./session-event-payload.js";
 import { resolveSessionStoreAgentId, resolveSessionStoreKey } from "./session-store-key.js";
-import { deriveSessionTitle } from "./session-utils-core.js";
+import { buildStoreChildSessionIndex, deriveSessionTitle } from "./session-utils-core.js";
 import { listSessionsFromStore, listSessionsFromStoreAsync } from "./session-utils-list.js";
 import { getSessionDefaults, resolveGatewayModelSupportsImages } from "./session-utils-model.js";
 import {
@@ -4335,3 +4335,26 @@ describe("resolveGatewayModelSupportsImages", () => {
   });
 });
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
+
+describe("buildStoreChildSessionIndex cron run parents", () => {
+  test("indexes children of a cron run under the durable job key", () => {
+    // Regression: subagents record the ephemeral `:run:` key as their parent. That key
+    // is never persisted as a session row, so children matched no listed parent and
+    // each surfaced as its own sidebar root instead of nesting under the cron job.
+    const jobKey = "agent:main:cron:job-1";
+    const store: Record<string, SessionEntry> = {
+      [jobKey]: { sessionId: "job-session", updatedAt: Date.now() },
+      "agent:main:subagent:child-1": {
+        sessionId: "child-session",
+        updatedAt: Date.now(),
+        parentSessionKey: `${jobKey}:run:run-1`,
+        spawnedBy: `${jobKey}:run:run-1`,
+      } as SessionEntry,
+    };
+
+    const index = buildStoreChildSessionIndex(store, Date.now());
+
+    expect(index.get(jobKey)).toContain("agent:main:subagent:child-1");
+    expect(index.get(`${jobKey}:run:run-1`)).toBeUndefined();
+  });
+});
