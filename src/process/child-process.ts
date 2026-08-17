@@ -63,14 +63,18 @@ export function releaseChildProcessOutputAfterExit(child: ChildProcess): () => v
     idleTimer.unref();
   };
   const onData = () => {
-    if (exited) {
+    if (exited && deadlineTimer) {
       armIdleTimer();
     }
   };
   const onExit = () => {
     exited = true;
     armIdleTimer();
-    deadlineTimer = setTimeout(release, EXIT_STDIO_MAX_DRAIN_MS);
+    deadlineTimer = setTimeout(() => {
+      deadlineTimer = undefined;
+      // Let poll drain output buffered during a stalled timers phase before the hard release.
+      setImmediate(release).unref();
+    }, EXIT_STDIO_MAX_DRAIN_MS);
     deadlineTimer.unref();
   };
 

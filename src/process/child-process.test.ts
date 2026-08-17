@@ -33,11 +33,11 @@ describe.skipIf(process.platform === "win32")("releaseChildProcessOutputAfterExi
     });
 
     // Simulate a contended worker after the direct child exits. The descendant
-    // writes while JS is parked, so its pipe data and the idle timer are both
-    // ready when the event loop resumes.
+    // writes while JS is parked past the hard drain deadline, so its pipe data
+    // and both release timers are ready when the event loop resumes.
     await new Promise<void>((resolve) => {
       child?.nodeChildProcess.once("exit", () => {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_250);
         resolve();
       });
     });
@@ -80,10 +80,13 @@ describe.skipIf(process.platform === "win32")("releaseChildProcessOutputAfterExi
     await vi.advanceTimersByTimeAsync(999);
     expect(stdout.destroyed).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
+    expect(stdout.destroyed).toBe(false);
+
+    clearInterval(writer);
+    await vi.runAllTimersAsync();
     expect(stdout.destroyed).toBe(true);
     expect(stderr.destroyed).toBe(true);
 
-    clearInterval(writer);
     cleanup();
   });
 });
