@@ -10,6 +10,7 @@ import type {
 } from "../../packages/gateway-protocol/src/index.js";
 import { runGit } from "../agents/worktrees/git.js";
 import type { SessionDiffBaseline } from "../config/sessions/types.js";
+import { findUsableGitCheckoutRoot } from "../infra/git-root.js";
 import { runCommandBuffered } from "../process/exec.js";
 import {
   loadSessionDiffBranchMetadata,
@@ -372,7 +373,7 @@ export async function loadCheckoutDiff(params: CheckoutDiffParams): Promise<Sess
     deletions: 0,
     ...(unavailableReason ? { unavailableReason } : {}),
   });
-  const root = (await gitOut(params.cwd, ["rev-parse", "--show-toplevel"]))?.trim();
+  const root = findUsableGitCheckoutRoot(params.cwd);
   if (!root) {
     return empty("not_git");
   }

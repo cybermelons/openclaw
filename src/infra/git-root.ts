@@ -75,28 +75,32 @@ function resolveCommonGitDir(gitDir: string): string | null {
   }
 }
 
-export function hasUsableGitMetadata(startDir: string): boolean {
+export function findUsableGitCheckoutRoot(startDir: string): string | null {
   const repoRoot = findGitRoot(startDir, { maxDepth: Number.MAX_SAFE_INTEGER });
   if (!repoRoot) {
-    return false;
+    return null;
   }
   const gitDir = resolveGitDirFromMarker(repoRoot);
   if (!gitDir) {
-    return false;
+    return null;
   }
   const commonGitDir = resolveCommonGitDir(gitDir);
   if (!commonGitDir) {
-    return false;
+    return null;
   }
   try {
-    return (
+    const usable =
       fs.statSync(path.join(gitDir, "HEAD")).isFile() &&
       fs.statSync(path.join(commonGitDir, "objects")).isDirectory() &&
-      fs.statSync(path.join(commonGitDir, "refs")).isDirectory()
-    );
+      fs.statSync(path.join(commonGitDir, "refs")).isDirectory();
+    return usable ? repoRoot : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function hasUsableGitMetadata(startDir: string): boolean {
+  return findUsableGitCheckoutRoot(startDir) !== null;
 }
 
 export function resolveGitHeadPath(

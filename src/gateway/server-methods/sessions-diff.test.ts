@@ -155,6 +155,15 @@ describe("loadSessionDiff", () => {
     expect(hoisted.patchSessionEntryCore).not.toHaveBeenCalled();
   });
 
+  it("rejects an incomplete checkout marker before loading a diff", async () => {
+    fs.mkdirSync(path.join(repoRoot, ".git"));
+    mockSession(repoRoot);
+
+    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
+
+    expect(result.unavailableReason).toBe("not_git");
+  });
+
   it("uses the persisted fixed-store owner for a bare session checkout", async () => {
     initRepo(repoRoot);
     fs.writeFileSync(path.join(repoRoot, "owned.txt"), "ops\n");
