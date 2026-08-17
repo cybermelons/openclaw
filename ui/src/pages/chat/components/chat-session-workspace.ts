@@ -444,16 +444,15 @@ function loadWorkspaceStatus(
       current.gitCheckout = result.gitCheckout ?? null;
       current.statusLoaded = true;
     })
-    .catch(() => {
+    .catch((error) => {
       const current = currentWorkspaceState(state);
       if (
         current === workspace &&
         current.statusRequestId === requestId &&
         current.checkoutRequestId === checkoutRequestId
       ) {
-        // The diff panel already owns unknown/not-git fallbacks. A status read
-        // failure must not block the workspace rail or strand its refresh path.
-        current.gitCheckout = null;
+        current.error = formatUiError(error);
+        current.gitCheckout = false;
         current.statusLoaded = true;
       }
     })
@@ -478,9 +477,7 @@ export function refreshSessionWorkspace(state: SessionWorkspaceHost) {
     return;
   }
   if (workspace.collapsed) {
-    if (isGatewayMethodAdvertised(state, "sessions.workspace.status") === true) {
-      loadWorkspaceStatus(state, workspace, true);
-    }
+    loadWorkspaceStatus(state, workspace, true);
     return;
   }
   if (workspace.loading) {
@@ -780,8 +777,6 @@ export function createSessionWorkspaceProps(
 ): SessionWorkspaceProps {
   state.sessionWorkspaceDraftScope = options?.draftScope;
   const workspace = getWorkspaceState(state);
-  const diffAdvertised = isGatewayMethodAdvertised(state, "sessions.diff") === true;
-  const statusAdvertised = isGatewayMethodAdvertised(state, "sessions.workspace.status") === true;
   if (
     (options?.expanded === true || !workspace.collapsed) &&
     state.connected &&
@@ -793,8 +788,6 @@ export function createSessionWorkspaceProps(
     loadWorkspace(state, workspace);
   } else if (
     workspace.collapsed &&
-    diffAdvertised &&
-    statusAdvertised &&
     state.connected &&
     state.agentsList &&
     !workspace.statusLoading &&

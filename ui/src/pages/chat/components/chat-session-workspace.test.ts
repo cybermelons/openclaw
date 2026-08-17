@@ -61,11 +61,14 @@ describe("session workspace state", () => {
       expect(createSessionWorkspaceProps(state).onOpenDiff).toBeTypeOf("function"),
     );
   });
-  it("does not load session files for a collapsed older Gateway", async () => {
+  it("surfaces a missing core status method without loading session files", async () => {
     const listFiles = vi.fn();
+    const request = vi
+      .fn()
+      .mockRejectedValue(new Error("Unknown method: sessions.workspace.status"));
     const state = {
       agentsList: { agents: [{ id: "main" }], defaultId: "main" },
-      client: { request: vi.fn().mockResolvedValue({ artifacts: [] }) },
+      client: { request },
       connected: true,
       handleOpenSidebar: vi.fn(),
       hello: gatewayHello(["sessions.diff"]),
@@ -74,7 +77,18 @@ describe("session workspace state", () => {
       sessions: { listFiles },
     } as unknown as SessionWorkspaceHost;
 
-    expect(createSessionWorkspaceProps(state).onOpenDiff).toBeUndefined();
+    createSessionWorkspaceProps(state);
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith("sessions.workspace.status", {
+        sessionKey: "agent:main:current",
+        agentId: "main",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(createSessionWorkspaceProps(state).error).toBe(
+        "Unknown method: sessions.workspace.status",
+      ),
+    );
     refreshSessionWorkspace(state);
     await Promise.resolve();
     expect(listFiles).not.toHaveBeenCalled();

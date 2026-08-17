@@ -763,12 +763,18 @@ describeControlUiE2e("session diff panel", () => {
     await expect.poll(() => panelActionIds(page)).toContain("changes");
   });
 
-  it("hides the diff toggle for gateways that omit checkout capability", async () => {
+  it("surfaces gateways that omit the core checkout-status method", async () => {
     const context = await newBrowserContext();
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       featureMethods: ["chat.metadata", "chat.startup", "sessions.diff"],
       methodResponses: {
+        "sessions.workspace.status": {
+          __mockError: {
+            code: "INVALID_REQUEST",
+            message: "Unknown method: sessions.workspace.status",
+          },
+        },
         "sessions.diff": {
           sessionKey: "main",
           files: [],
@@ -780,6 +786,13 @@ describeControlUiE2e("session diff panel", () => {
     });
     await page.goto(`${server.baseUrl}chat`);
 
+    await expect
+      .poll(async () => (await gateway.getRequests("sessions.workspace.status")).length)
+      .toBe(1);
+    await openChatSidePanelType(page, "Files");
+    await expect
+      .poll(() => page.locator(".chat-workspace-rail__state--error").textContent())
+      .toContain("Unknown method: sessions.workspace.status");
     await expect.poll(() => panelActionIds(page)).not.toContain("changes");
     expect(await gateway.getRequests("sessions.files.list")).toHaveLength(0);
     expect(await gateway.getRequests("sessions.diff")).toHaveLength(0);
