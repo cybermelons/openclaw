@@ -276,6 +276,35 @@ describe("mock gateway stateful sessions", () => {
     socket.close();
   });
 
+  it("omits optional workspace status fields when the generic mock has no workspace", async () => {
+    const script = createControlUiMockGatewayInitScript({});
+    window.sessionStorage.clear();
+    // oxlint-disable-next-line typescript/no-implied-eval -- Exercises the serialized browser fixture.
+    new Function(script)();
+
+    const socket = new WebSocket("ws://mock-gateway");
+    const frames: ResponseFrame[] = [];
+    socket.addEventListener("message", (event) => {
+      frames.push(JSON.parse(String((event as MessageEvent).data)) as ResponseFrame);
+    });
+    await flushMockTimers();
+
+    socket.send(
+      JSON.stringify({
+        type: "req",
+        id: "workspace-status",
+        method: "sessions.workspace.status",
+        params: { sessionKey: "main" },
+      }),
+    );
+    await flushMockTimers();
+
+    expect(frames.find((frame) => frame.id === "workspace-status")?.payload).toEqual({
+      sessionKey: "main",
+    });
+    socket.close();
+  });
+
   it("acknowledges broad session observation with the real Gateway response", async () => {
     const script = createControlUiMockGatewayInitScript({});
     window.sessionStorage.clear();
