@@ -52,6 +52,7 @@ export type ToolStreamEntry = {
   /** Monotonic edit counts received while the tool arguments stream. */
   liveDiffStat?: DiffStat;
   isError?: boolean;
+  exitCode?: number;
   /** True once a result event landed, even when the output text is empty. */
   resultReceived?: boolean;
   startedAt: number;
@@ -275,6 +276,7 @@ function buildToolStreamMessage(entry: ToolStreamEntry): Record<string, unknown>
       text: entry.output ?? "",
       ...(entry.details !== undefined ? { details: entry.details } : {}),
       ...(entry.isError !== undefined ? { isError: entry.isError } : {}),
+      ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
     });
   }
   return {
@@ -1057,6 +1059,12 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
   const resultDetails = phase === "result" ? readRecord(data.result)?.details : undefined;
   const resultIsError =
     phase === "result" && typeof data.isError === "boolean" ? data.isError : undefined;
+  const resultRecord = phase === "result" ? readRecord(data.result) : undefined;
+  const resultExitCode = resultRecord?.exitCode;
+  const exitCode =
+    typeof resultExitCode === "number" && Number.isInteger(resultExitCode)
+      ? resultExitCode
+      : undefined;
   const liveDiffStat = phase === "input_delta" ? readLiveDiffStat(data.diff) : undefined;
   if (name === "session_status" && phase === "result") {
     syncSessionStatusModelOverride(host, data);
@@ -1091,6 +1099,7 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
       output: output || undefined,
       ...(resultDetails !== undefined ? { details: resultDetails } : {}),
       ...(resultIsError !== undefined ? { isError: resultIsError } : {}),
+      ...(exitCode !== undefined ? { exitCode } : {}),
       ...(liveDiffStat ? { liveDiffStat } : {}),
       ...(phase === "result" ? { resultReceived: true } : {}),
       startedAt: typeof payload.ts === "number" ? payload.ts : now,
@@ -1112,6 +1121,9 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
     }
     if (resultIsError !== undefined) {
       entry.isError = resultIsError;
+    }
+    if (exitCode !== undefined) {
+      entry.exitCode = exitCode;
     }
     if (liveDiffStat) {
       entry.liveDiffStat = liveDiffStat;
