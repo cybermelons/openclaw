@@ -89,7 +89,7 @@ export function persistSessionTranscriptArchive(
   }
 }
 
-const PENDING_ARCHIVE_PUBLISH_BATCH_SIZE = 256;
+const PENDING_ARCHIVE_PUBLISH_BATCH_SIZE = 4;
 
 // Composite map keys keep repeated physical IDs distinct across transcript rewrites.
 function transcriptArchiveIdentityKey(sessionId: string, generation: string): string {
