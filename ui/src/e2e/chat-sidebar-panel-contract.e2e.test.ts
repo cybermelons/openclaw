@@ -56,6 +56,7 @@ function coldOpenScenario(): ControlUiMockGatewayScenario {
       "sessions.companion.state",
       "sessions.diff",
       "sessions.files.list",
+      "sessions.workspace.status",
       "tasks.list",
       "terminal.open",
     ],
@@ -73,6 +74,11 @@ function coldOpenScenario(): ControlUiMockGatewayScenario {
       "sessions.files.list": {
         browser: { entries: [], path: "" },
         files: [],
+        gitCheckout: false,
+        root: "/tmp/plain-workspace",
+        sessionKey: "main",
+      },
+      "sessions.workspace.status": {
         gitCheckout: false,
         root: "/tmp/plain-workspace",
         sessionKey: "main",
@@ -224,7 +230,7 @@ async function openColdSidebar(page: Page, scenario = coldOpenScenario()) {
   await waitForControlUiGatewayReady(page);
   await gateway.waitForRequest("session.discussion.info");
   await gateway.waitForRequest("sessions.companion.state");
-  await gateway.waitForRequest("sessions.files.list");
+  await gateway.waitForRequest("sessions.workspace.status");
   await page.getByRole("button", { name: "Side panel", exact: true }).first().click();
   const choices = page.locator(".side-panel-empty__type");
   await choices.first().waitFor();
