@@ -1,4 +1,5 @@
 type MarkdownCodeBlockChrome = "copy" | "none";
+type MarkdownTableInteractions = "enabled" | "none";
 type MarkdownRenderMode = "document" | "message";
 
 export type MarkdownRenderOptions = {
@@ -7,6 +8,7 @@ export type MarkdownRenderOptions = {
   fileLinks?: boolean;
   interactiveImages?: boolean;
   mode?: MarkdownRenderMode;
+  tableInteractions?: MarkdownTableInteractions;
 };
 
 export type MarkdownRenderEnv = Required<MarkdownRenderOptions>;
@@ -20,5 +22,6 @@ export function normalizeMarkdownRenderOptions(
     fileLinks: options.fileLinks ?? false,
     interactiveImages: options.interactiveImages ?? false,
     mode: options.mode ?? "message",
+    tableInteractions: options.tableInteractions ?? "none",
   };
 }

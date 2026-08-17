@@ -295,6 +295,7 @@ export function renderGroupedMessage(
     codeBlockChrome: role === "user" ? "none" : "copy",
     fileLinks: true,
     interactiveImages: opts.onOpenImage !== undefined,
+    tableInteractions: "enabled",
   };
 
   // Detect pure-JSON messages and render as collapsible block
