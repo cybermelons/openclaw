@@ -75,6 +75,8 @@ const MAX_PREVIEW_BYTES = WORKSPACE_PREVIEW_MAX_BYTES;
 const MAX_BROWSER_ENTRIES = 250;
 const MAX_SEARCH_ENTRIES = 500;
 const MAX_SEARCH_VISITED_ENTRIES = 5_000;
+// Share only overlapping Git probes for one workspace. Each entry is removed when
+// its promise settles so a later request observes the current checkout state.
 const gitCheckoutStatusProbes = new Map<string, Promise<boolean>>();
 // Matches file-type's documented default buffer sample while keeping metadata
 // classification independent from the 256 KiB inline-content cap.
