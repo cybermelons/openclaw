@@ -61,6 +61,44 @@ function resolveGitDirFromMarker(repoRoot: string): string | null {
   }
 }
 
+function resolveCommonGitDir(gitDir: string): string | null {
+  const commonDirPath = path.join(gitDir, "commondir");
+  try {
+    const stat = fs.statSync(commonDirPath);
+    if (!stat.isFile()) {
+      return null;
+    }
+    const relative = fs.readFileSync(commonDirPath, "utf-8").trim();
+    return relative ? path.resolve(gitDir, relative) : null;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? gitDir : null;
+  }
+}
+
+export function hasUsableGitMetadata(startDir: string): boolean {
+  const repoRoot = findGitRoot(startDir, { maxDepth: Number.MAX_SAFE_INTEGER });
+  if (!repoRoot) {
+    return false;
+  }
+  const gitDir = resolveGitDirFromMarker(repoRoot);
+  if (!gitDir) {
+    return false;
+  }
+  const commonGitDir = resolveCommonGitDir(gitDir);
+  if (!commonGitDir) {
+    return false;
+  }
+  try {
+    return (
+      fs.statSync(path.join(gitDir, "HEAD")).isFile() &&
+      fs.statSync(path.join(commonGitDir, "objects")).isDirectory() &&
+      fs.statSync(path.join(commonGitDir, "refs")).isDirectory()
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function resolveGitHeadPath(
   startDir: string,
   opts: { maxDepth?: number } = {},

@@ -21,9 +21,9 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { resolveToCwd as resolveSessionToolPathToCwd } from "../../agents/sessions/tools/path-utils.js";
-import { insideGitCheckout } from "../../agents/worktrees/git.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
+import { hasUsableGitMetadata } from "../../infra/git-root.js";
 import { isPathInside } from "../../infra/path-guards.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
@@ -556,7 +556,7 @@ function loadGitCheckoutStatus(diffCwd: string | undefined): boolean | undefined
   if (!diffCwd) {
     return undefined;
   }
-  return insideGitCheckout(diffCwd);
+  return hasUsableGitMetadata(diffCwd);
 }
 
 async function buildWorkspaceStatus(params: {

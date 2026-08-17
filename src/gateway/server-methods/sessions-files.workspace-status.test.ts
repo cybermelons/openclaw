@@ -105,7 +105,7 @@ describe("sessions.workspace.status RPC handler", () => {
     expect(removedCheckoutPayload.gitCheckout).toBe(false);
   });
 
-  it("detects nested checkouts without spawning Git", async () => {
+  it("rejects invalid metadata and detects nested checkouts without spawning Git", async () => {
     const checkoutRoot = path.join(workspaceRoot, "checkout");
     const nestedRoot = path.join(checkoutRoot, "packages", "app");
     fs.mkdirSync(nestedRoot, { recursive: true });
@@ -129,7 +129,18 @@ describe("sessions.workspace.status RPC handler", () => {
         sessionKey: "agent:main:nested-checkout",
       }),
     );
-    expect(payload.gitCheckout).toBe(true);
+    expect(payload.gitCheckout).toBe(false);
+
+    const gitInit = await import("node:child_process").then(({ execFileSync }) =>
+      execFileSync("git", ["init", "--quiet"], { cwd: checkoutRoot }),
+    );
+    expect(gitInit).toBeInstanceOf(Buffer);
+    const initializedPayload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.workspace.status", {
+        sessionKey: "agent:main:nested-checkout",
+      }),
+    );
+    expect(initializedPayload.gitCheckout).toBe(true);
     expect(hoisted.runGit).not.toHaveBeenCalled();
   });
 });
