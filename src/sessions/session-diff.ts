@@ -364,11 +364,15 @@ type CheckoutDiffParams = { cwd: string; sessionKey: string } & (
 );
 
 async function resolveGitDirOnlyCheckoutRoot(cwd: string): Promise<string | null> {
-  const configuredWorkTree = (
-    await gitOut(cwd, ["config", "--path", "--get", "core.worktree"])
-  )?.trim();
-  if (configuredWorkTree) {
-    return nodePath.resolve(cwd, configuredWorkTree);
+  // Git ignores core.worktree when GIT_COMMON_DIR is explicit, so only consult
+  // config when that setting can participate in repository setup.
+  if (!process.env.GIT_COMMON_DIR?.trim()) {
+    const configuredWorkTree = (
+      await gitOut(cwd, ["config", "--path", "--get", "core.worktree"])
+    )?.trim();
+    if (configuredWorkTree) {
+      return nodePath.resolve(cwd, configuredWorkTree);
+    }
   }
   return (await gitOut(cwd, ["rev-parse", "--show-toplevel"]))?.trim() || null;
 }
