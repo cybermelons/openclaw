@@ -1,6 +1,7 @@
 // Discovers git repository roots by walking ancestor directories.
 import fs from "node:fs";
 import path from "node:path";
+import { hasErrnoCode } from "./errno.js";
 
 const DEFAULT_GIT_DISCOVERY_MAX_DEPTH = 12;
 
@@ -71,7 +72,7 @@ function resolveCommonGitDir(gitDir: string): string | null {
     const relative = fs.readFileSync(commonDirPath, "utf-8").trim();
     return relative ? path.resolve(gitDir, relative) : null;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? gitDir : null;
+    return hasErrnoCode(error, "ENOENT") ? gitDir : null;
   }
 }
 
