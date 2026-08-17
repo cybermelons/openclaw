@@ -220,6 +220,30 @@ describe("loadSessionDiff", () => {
     ]);
   });
 
+  it("honors core.worktree from an included Git config", async () => {
+    externalGitDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-diff-include-")),
+    );
+    execFileSync("git", ["init", "--quiet"], { cwd: externalGitDir });
+    const gitDir = path.join(externalGitDir, ".git");
+    const includedConfig = path.join(externalGitDir, "worktree.config");
+    fs.writeFileSync(includedConfig, `[core]\n\tworktree = ${repoRoot}\n`);
+    execFileSync("git", ["--git-dir", gitDir, "config", "include.path", includedConfig]);
+    vi.stubEnv("GIT_DIR", gitDir);
+    const nestedCwd = path.join(repoRoot, "nested");
+    fs.mkdirSync(nestedCwd);
+    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "included worktree\n");
+    mockSession(nestedCwd);
+
+    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
+
+    expect(result.unavailableReason).toBeUndefined();
+    expect(result.root).toBe(repoRoot);
+    expect(result.files).toEqual([
+      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
+    ]);
+  });
+
   it("uses the persisted fixed-store owner for a bare session checkout", async () => {
     initRepo(repoRoot);
     fs.writeFileSync(path.join(repoRoot, "owned.txt"), "ops\n");

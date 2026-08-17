@@ -192,16 +192,6 @@ describe("git-root", () => {
           GIT_DIR: path.join(metadataSource, ".git"),
         }),
       ).toBe(unrelatedCwd);
-      execFileSync(
-        "git",
-        ["--git-dir", path.join(metadataSource, ".git"), "config", "core.worktree", workTree],
-        { cwd: unrelatedCwd },
-      );
-      expect(
-        findUsableGitCheckoutRoot(unrelatedCwd, {
-          GIT_DIR: path.join(metadataSource, ".git"),
-        }),
-      ).toBe(workTree);
       expect(findUsableGitCheckoutRoot(unrelatedCwd, { GIT_DIR: gitDir })).toBeNull();
       expect(findUsableGitCheckoutRoot(metadataSource, { GIT_WORK_TREE: workTree })).toBe(workTree);
     });

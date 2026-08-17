@@ -119,15 +119,10 @@ function resolveGitCheckout(startDir: string, env: NodeJS.ProcessEnv): ResolvedG
   };
 }
 
-function readCoreRepositoryConfig(commonGitDir: string): {
-  bare: boolean;
-  workTree?: string;
-} {
+function hasBareRepositoryConfig(commonGitDir: string): boolean {
   try {
     const raw = fs.readFileSync(path.join(commonGitDir, "config"), "utf-8");
     let inCoreSection = false;
-    let bare = false;
-    let workTree: string | undefined;
     for (const line of raw.split(/\r?\n/)) {
       const section = line.match(/^\s*\[([^\]]+)]/);
       if (section) {
@@ -140,18 +135,12 @@ function readCoreRepositoryConfig(commonGitDir: string): {
       const bareSetting = line.match(/^\s*bare(?:\s*=\s*([^#;]*))?\s*(?:[#;].*)?$/i);
       if (bareSetting) {
         const value = bareSetting[1]?.trim().toLowerCase();
-        bare = value === undefined || ["1", "on", "true", "yes"].includes(value);
-        continue;
-      }
-      const configuredWorkTree = line.match(/^\s*worktree\s*=\s*([^#;]+?)\s*(?:[#;].*)?$/i);
-      if (configuredWorkTree?.[1]) {
-        const value = configuredWorkTree[1].trim();
-        workTree = value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
+        return value === undefined || ["1", "on", "true", "yes"].includes(value);
       }
     }
-    return { bare, ...(workTree ? { workTree } : {}) };
+    return false;
   } catch {
-    return { bare: false };
+    return false;
   }
 }
 
@@ -167,20 +156,15 @@ export function findUsableGitCheckoutRoot(
   if (!commonGitDir) {
     return null;
   }
-  const coreConfig = readCoreRepositoryConfig(commonGitDir);
-  if (checkout.requiresNonBareGitDir && coreConfig.bare) {
+  if (checkout.requiresNonBareGitDir && hasBareRepositoryConfig(commonGitDir)) {
     return null;
   }
-  const repoRoot =
-    checkout.requiresNonBareGitDir && coreConfig.workTree
-      ? path.resolve(checkout.gitDir, coreConfig.workTree)
-      : checkout.repoRoot;
   try {
     const usable =
       fs.statSync(path.join(checkout.gitDir, "HEAD")).isFile() &&
       fs.statSync(path.join(commonGitDir, "objects")).isDirectory() &&
       fs.statSync(path.join(commonGitDir, "refs")).isDirectory();
-    return usable ? repoRoot : null;
+    return usable ? checkout.repoRoot : null;
   } catch {
     return null;
   }
