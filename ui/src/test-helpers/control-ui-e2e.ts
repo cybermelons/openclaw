@@ -1284,6 +1284,22 @@ function installControlUiMockGateway(
     return value;
   }
 
+  function applyWorkspaceStatusSessionKey(
+    method: string,
+    value: unknown,
+    params: unknown,
+  ): unknown {
+    if (
+      method !== "sessions.workspace.status" ||
+      !isRecord(value) ||
+      !isRecord(params) ||
+      typeof params.sessionKey !== "string"
+    ) {
+      return value;
+    }
+    return { ...value, sessionKey: params.sessionKey };
+  }
+
   /** Transcript fields a scenario configured on chat.history, replayed onto the
    * chat.startup payload so both bootstrap paths serve the same conversation. */
   function configuredHistoryTranscript(): Record<string, unknown> {
@@ -1616,7 +1632,11 @@ function installControlUiMockGateway(
     }
     const configured = configuredResponse(method, params);
     if (configured.found) {
-      const configuredValue = applyScenarioAgentModel(method, configured.value);
+      const configuredValue = applyWorkspaceStatusSessionKey(
+        method,
+        applyScenarioAgentModel(method, configured.value),
+        params,
+      );
       if (method === "sessions.create" || method === "sessions.catalog.continue") {
         recordMaterializedSession(params, configuredValue);
       }

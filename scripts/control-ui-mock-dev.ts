@@ -2373,7 +2373,6 @@ async function createChatPickerScenario(
       "sessions.workspace.status": {
         gitCheckout: true,
         root: sessionWorkspaceRoot,
-        sessionKey: "agent:main:main",
       },
       "artifacts.list": {
         cases: [

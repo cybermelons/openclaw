@@ -276,6 +276,44 @@ describe("mock gateway stateful sessions", () => {
     socket.close();
   });
 
+  it("returns the requested session identity from a configured workspace status", async () => {
+    const script = createControlUiMockGatewayInitScript({
+      methodResponses: {
+        "sessions.workspace.status": {
+          gitCheckout: true,
+          root: "/tmp/mock-workspace",
+        },
+      },
+    });
+    window.sessionStorage.clear();
+    // oxlint-disable-next-line typescript/no-implied-eval -- Exercises the serialized browser fixture.
+    new Function(script)();
+
+    const socket = new WebSocket("ws://mock-gateway");
+    const frames: ResponseFrame[] = [];
+    socket.addEventListener("message", (event) => {
+      frames.push(JSON.parse(String((event as MessageEvent).data)) as ResponseFrame);
+    });
+    await flushMockTimers();
+
+    socket.send(
+      JSON.stringify({
+        type: "req",
+        id: "workspace-status-alpha",
+        method: "sessions.workspace.status",
+        params: { sessionKey: "agent:alpha" },
+      }),
+    );
+    await flushMockTimers();
+
+    expect(frames.find((frame) => frame.id === "workspace-status-alpha")?.payload).toEqual({
+      gitCheckout: true,
+      root: "/tmp/mock-workspace",
+      sessionKey: "agent:alpha",
+    });
+    socket.close();
+  });
+
   it("omits optional workspace status fields when the generic mock has no workspace", async () => {
     const script = createControlUiMockGatewayInitScript({});
     window.sessionStorage.clear();
