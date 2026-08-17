@@ -477,12 +477,13 @@ export function refreshSessionWorkspace(state: SessionWorkspaceHost) {
   if (!workspace || workspace.sessionKey !== state.sessionKey) {
     return;
   }
-  if (
-    workspace.collapsed &&
-    isGatewayMethodAdvertised(state, "sessions.workspace.status") === true
-  ) {
-    loadWorkspaceStatus(state, workspace, true);
-  } else if (workspace.loading) {
+  if (workspace.collapsed) {
+    if (isGatewayMethodAdvertised(state, "sessions.workspace.status") === true) {
+      loadWorkspaceStatus(state, workspace, true);
+    }
+    return;
+  }
+  if (workspace.loading) {
     workspace.pendingReload = true;
   } else {
     loadWorkspace(state, workspace);

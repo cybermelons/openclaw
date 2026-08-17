@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createSessionWorkspaceProps,
   openSessionWorkspaceFile,
+  refreshSessionWorkspace,
   renderSessionWorkspaceRail,
   type SessionWorkspaceHost,
 } from "./chat-session-workspace.ts";
@@ -74,6 +75,7 @@ describe("session workspace state", () => {
     } as unknown as SessionWorkspaceHost;
 
     expect(createSessionWorkspaceProps(state).onOpenDiff).toBeUndefined();
+    refreshSessionWorkspace(state);
     await Promise.resolve();
     expect(listFiles).not.toHaveBeenCalled();
     expect(createSessionWorkspaceProps(state).onOpenDiff).toBeUndefined();
