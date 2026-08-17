@@ -9,9 +9,14 @@ import { NonEmptyString, SessionLabelString } from "./primitives.js";
 import { SessionsCreateParamsSchema } from "./sessions-create.js";
 import { SessionsRecoverParamsSchema, SessionsRecoverResultSchema } from "./sessions-recover.js";
 import { SessionOwnerSchema } from "./sessions-row.js";
+import {
+  SessionsWorkspaceStatusParamsSchema,
+  SessionsWorkspaceStatusResultSchema,
+} from "./sessions-workspace-status.js";
 
 export { SessionsCreateParamsSchema };
 export { SessionsRecoverParamsSchema, SessionsRecoverResultSchema };
+export { SessionsWorkspaceStatusParamsSchema, SessionsWorkspaceStatusResultSchema };
 export { SessionsResolveParamsSchema, type SessionsResolveParams } from "./sessions-resolve.js";
 export {
   SESSIONS_PATCH_MANY_MAX_TARGETS,
@@ -246,19 +251,6 @@ export const SessionFileBrowserResultSchema = closedObject({
   search: Type.Optional(Type.String()),
   entries: Type.Array(SessionFileBrowserEntrySchema),
   truncated: Type.Optional(Type.Boolean()),
-});
-
-/** Reads lightweight workspace facts without scanning a session transcript. */
-export const SessionsWorkspaceStatusParamsSchema = closedObject({
-  sessionKey: NonEmptyString,
-  agentId: Type.Optional(NonEmptyString),
-});
-
-/** Lightweight workspace facts used by collapsed session controls. */
-export const SessionsWorkspaceStatusResultSchema = closedObject({
-  sessionKey: NonEmptyString,
-  root: Type.Optional(NonEmptyString),
-  gitCheckout: Type.Optional(Type.Boolean()),
 });
 
 /** Lists files touched by a session transcript. */
