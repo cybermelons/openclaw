@@ -132,7 +132,7 @@ describe("sessions.workspace.status RPC handler", () => {
     expect(payload.gitCheckout).toBe(false);
 
     const gitInit = await import("node:child_process").then(({ execFileSync }) =>
-      execFileSync("git", ["init", "--quiet"], { cwd: checkoutRoot }),
+      execFileSync("git", ["init", "--quiet", "--ref-format=reftable"], { cwd: checkoutRoot }),
     );
     expect(gitInit).toBeInstanceOf(Buffer);
     const initializedPayload = expectOkPayload(

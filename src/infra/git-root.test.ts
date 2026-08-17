@@ -1,4 +1,5 @@
 // Covers git root and HEAD path discovery.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -146,6 +147,17 @@ describe("git-root", () => {
       await fs.writeFile(path.join(checkoutRoot, ".git"), `gitdir: ${worktreeGitDir}\n`);
       await fs.writeFile(path.join(worktreeGitDir, "HEAD"), "ref: refs/heads/main\n");
       await fs.writeFile(path.join(worktreeGitDir, "commondir"), "../..\n");
+
+      expect(hasUsableGitMetadata(nested)).toBe(true);
+    });
+  });
+
+  it("accepts metadata created by Git's reftable backend", async () => {
+    await withTestDir({ prefix: "openclaw-git-root-reftable-" }, async (temp) => {
+      const repoRoot = path.join(temp, "repo");
+      const nested = path.join(repoRoot, "nested");
+      await fs.mkdir(nested, { recursive: true });
+      execFileSync("git", ["init", "--quiet", "--ref-format=reftable"], { cwd: repoRoot });
 
       expect(hasUsableGitMetadata(nested)).toBe(true);
     });

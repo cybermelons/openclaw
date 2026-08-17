@@ -44,8 +44,8 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
 }
 
-function initRepo(root: string): void {
-  git(root, "init", "-q", "-b", "main");
+function initRepo(root: string, refFormat?: "reftable"): void {
+  git(root, "init", "-q", "-b", "main", ...(refFormat ? [`--ref-format=${refFormat}`] : []));
   git(root, "config", "user.email", "test@openclaw.test");
   git(root, "config", "user.name", "Test");
   git(root, "config", "commit.gpgsign", "false");
@@ -162,6 +162,19 @@ describe("loadSessionDiff", () => {
     const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
 
     expect(result.unavailableReason).toBe("not_git");
+  });
+
+  it("loads diffs from a checkout using Git's reftable backend", async () => {
+    initRepo(repoRoot, "reftable");
+    fs.writeFileSync(path.join(repoRoot, "untracked.txt"), "reftable\n");
+    mockSession(repoRoot);
+
+    const result = await loadSessionDiff({ sessionKey: "agent:main:s1" });
+
+    expect(result.unavailableReason).toBeUndefined();
+    expect(result.files).toEqual([
+      expect.objectContaining({ path: "untracked.txt", status: "added", untracked: true }),
+    ]);
   });
 
   it("uses the persisted fixed-store owner for a bare session checkout", async () => {
