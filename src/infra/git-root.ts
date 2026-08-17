@@ -87,12 +87,16 @@ function resolveCommonGitDir(
 type ResolvedGitCheckout = {
   gitDir: string;
   repoRoot: string;
-  requiresNonBareGitDir: boolean;
 };
 
 function resolveGitCheckout(startDir: string, env: NodeJS.ProcessEnv): ResolvedGitCheckout | null {
   const explicitGitDir = env.GIT_DIR?.trim();
   const explicitWorkTree = env.GIT_WORK_TREE?.trim();
+  if (explicitGitDir && !explicitWorkTree) {
+    // Git config (including includes and conditional includes) decides whether
+    // this is a worktree. Callers that support this override delegate to Git.
+    return null;
+  }
   const markerRoot = explicitGitDir
     ? null
     : findGitRoot(startDir, { maxDepth: Number.MAX_SAFE_INTEGER });
@@ -115,33 +119,7 @@ function resolveGitCheckout(startDir: string, env: NodeJS.ProcessEnv): ResolvedG
   return {
     gitDir,
     repoRoot,
-    requiresNonBareGitDir: Boolean(explicitGitDir && !explicitWorkTree),
   };
-}
-
-function hasBareRepositoryConfig(commonGitDir: string): boolean {
-  try {
-    const raw = fs.readFileSync(path.join(commonGitDir, "config"), "utf-8");
-    let inCoreSection = false;
-    for (const line of raw.split(/\r?\n/)) {
-      const section = line.match(/^\s*\[([^\]]+)]/);
-      if (section) {
-        inCoreSection = section[1]?.trim().toLowerCase() === "core";
-        continue;
-      }
-      if (!inCoreSection) {
-        continue;
-      }
-      const bareSetting = line.match(/^\s*bare(?:\s*=\s*([^#;]*))?\s*(?:[#;].*)?$/i);
-      if (bareSetting) {
-        const value = bareSetting[1]?.trim().toLowerCase();
-        return value === undefined || ["1", "on", "true", "yes"].includes(value);
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
 }
 
 export function findUsableGitCheckoutRoot(
@@ -154,9 +132,6 @@ export function findUsableGitCheckoutRoot(
   }
   const commonGitDir = resolveCommonGitDir(checkout.gitDir, startDir, env);
   if (!commonGitDir) {
-    return null;
-  }
-  if (checkout.requiresNonBareGitDir && hasBareRepositoryConfig(commonGitDir)) {
     return null;
   }
   try {

@@ -21,6 +21,7 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { resolveToCwd as resolveSessionToolPathToCwd } from "../../agents/sessions/tools/path-utils.js";
+import { runGit } from "../../agents/worktrees/git.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
 import { hasUsableGitMetadata } from "../../infra/git-root.js";
@@ -552,9 +553,17 @@ async function loadSessionFiles(params: {
   };
 }
 
-function loadGitCheckoutStatus(diffCwd: string | undefined): boolean | undefined {
+async function loadGitCheckoutStatus(diffCwd: string | undefined): Promise<boolean | undefined> {
   if (!diffCwd) {
     return undefined;
+  }
+  if (process.env.GIT_DIR?.trim() && !process.env.GIT_WORK_TREE?.trim()) {
+    try {
+      const result = await runGit(diffCwd, ["rev-parse", "--show-toplevel"]);
+      return result.code === 0;
+    } catch {
+      return false;
+    }
   }
   return hasUsableGitMetadata(diffCwd);
 }
@@ -567,7 +576,7 @@ async function buildWorkspaceStatus(params: {
   if (loaded.entry?.execNode) {
     return { sessionKey: params.sessionKey };
   }
-  const gitCheckout = loadGitCheckoutStatus(loaded.diffCwd);
+  const gitCheckout = await loadGitCheckoutStatus(loaded.diffCwd);
   return {
     sessionKey: params.sessionKey,
     ...(loaded.root ? { root: loaded.root } : {}),
@@ -588,7 +597,7 @@ async function buildListResult(params: {
 }> {
   const loaded = await loadSessionFiles(params);
   const root = loaded.root;
-  const gitCheckout = loadGitCheckoutStatus(loaded.diffCwd);
+  const gitCheckout = await loadGitCheckoutStatus(loaded.diffCwd);
   const workspaceFiles = root
     ? loaded.files.filter((file) =>
         Boolean(resolveTouchedFilePath({ root, fileRoot: loaded.fileRoot, filePath: file.path })),

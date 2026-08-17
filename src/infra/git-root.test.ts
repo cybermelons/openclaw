@@ -191,7 +191,7 @@ describe("git-root", () => {
         findUsableGitCheckoutRoot(unrelatedCwd, {
           GIT_DIR: path.join(metadataSource, ".git"),
         }),
-      ).toBe(unrelatedCwd);
+      ).toBeNull();
       expect(findUsableGitCheckoutRoot(unrelatedCwd, { GIT_DIR: gitDir })).toBeNull();
       expect(findUsableGitCheckoutRoot(metadataSource, { GIT_WORK_TREE: workTree })).toBe(workTree);
     });

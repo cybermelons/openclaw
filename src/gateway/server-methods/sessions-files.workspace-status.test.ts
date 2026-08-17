@@ -164,7 +164,7 @@ describe("sessions.workspace.status RPC handler", () => {
     expect(hoisted.runGit).not.toHaveBeenCalled();
   });
 
-  it("honors a non-bare GIT_DIR without an explicit worktree", async () => {
+  it("delegates a GIT_DIR-only override to Git's config-aware resolver", async () => {
     const metadataSource = path.join(workspaceRoot, "metadata-source");
     fs.mkdirSync(metadataSource);
     const gitInit = await import("node:child_process").then(({ execFileSync }) =>
@@ -180,6 +180,7 @@ describe("sessions.workspace.status RPC handler", () => {
     );
 
     expect(payload.gitCheckout).toBe(true);
-    expect(hoisted.runGit).not.toHaveBeenCalled();
+    expect(hoisted.runGit).toHaveBeenCalledOnce();
+    expect(hoisted.runGit).toHaveBeenCalledWith(workspaceRoot, ["rev-parse", "--show-toplevel"]);
   });
 });
