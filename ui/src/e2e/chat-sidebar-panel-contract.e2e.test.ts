@@ -190,6 +190,11 @@ function populatedColdOpenScenario(): ControlUiMockGatewayScenario {
         root: "/tmp/checkout",
         sessionKey: "main",
       },
+      "sessions.workspace.status": {
+        gitCheckout: true,
+        root: "/tmp/checkout",
+        sessionKey: "main",
+      },
       "tasks.list": {
         tasks: [
           {
