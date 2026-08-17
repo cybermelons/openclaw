@@ -37,7 +37,6 @@ const DISCORD_GATEWAY_POLICY_VIOLATION_CLOSE_CODE = 1008;
 const DISCORD_GATEWAY_WS_RECEIVER_LIMIT_CODE = "WS_ERR_TOO_MANY_BUFFERED_PARTS";
 const DISCORD_GATEWAY_CLOSE_REASON_LOG_MAX_CHARS = 240;
 const discordDnsLookup = createDiscordDnsLookup();
-const discordProviderDnsLookup = createDiscordProviderDnsLookup();
 
 type DiscordGatewayWebSocketCtor = typeof ws.WebSocket;
 type DiscordGatewayWebSocketAgent = InstanceType<typeof HttpsAgent> | HttpAgent;
@@ -417,12 +416,17 @@ export function createDiscordGatewayPlugin(params: {
     env: process.env,
   });
   const providerEndpoint = getDiscordProviderEndpointRuntime();
+  const providerGatewayUrl = providerEndpoint
+    ? new URL(providerEndpoint.descriptor.gatewayOrigin)
+    : undefined;
   let fetchImpl = createDiscordGatewayMetadataFetch(debugProxySettings.enabled);
   let wsAgent: DiscordGatewayWebSocketAgent | undefined =
-    providerEndpoint && new URL(providerEndpoint.descriptor.gatewayOrigin).protocol === "ws:"
+    providerGatewayUrl?.protocol === "ws:"
       ? undefined
       : new HttpsAgent({
-          lookup: providerEndpoint ? discordProviderDnsLookup : discordDnsLookup,
+          lookup: providerGatewayUrl
+            ? createDiscordProviderDnsLookup(providerGatewayUrl.hostname)
+            : discordDnsLookup,
         });
 
   if (proxy && !providerEndpoint) {

@@ -9,8 +9,8 @@ import {
   resolveDiscordGatewayInfoTimeoutMs,
 } from "./gateway-metadata.js";
 
-const { resolvePinnedHostnameMock } = vi.hoisted(() => ({
-  resolvePinnedHostnameMock: vi.fn(),
+const { resolvePinnedHostnameWithPolicyMock } = vi.hoisted(() => ({
+  resolvePinnedHostnameWithPolicyMock: vi.fn(),
 }));
 
 const { GatewayIntents, GatewayPlugin } = vi.hoisted(() => {
@@ -89,7 +89,7 @@ vi.mock("openclaw/plugin-sdk/runtime-env", async (importOriginal) => {
 
 vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("openclaw/plugin-sdk/ssrf-runtime")>()),
-  resolvePinnedHostname: resolvePinnedHostnameMock,
+  resolvePinnedHostnameWithPolicy: resolvePinnedHostnameWithPolicyMock,
 }));
 
 describe("createDiscordGatewayPlugin", () => {
@@ -98,7 +98,7 @@ describe("createDiscordGatewayPlugin", () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    resolvePinnedHostnameMock.mockReset();
+    resolvePinnedHostnameWithPolicyMock.mockReset();
     ({ createDiscordGatewayPlugin, resolveDiscordGatewayIntents } =
       await import("./gateway-plugin.js"));
   });
@@ -317,11 +317,11 @@ describe("createDiscordGatewayPlugin", () => {
     });
     const pinnedLookup = vi.fn(
       (_hostname: string, _options: unknown, callback: (error: null, value: string) => void) =>
-        callback(null, "93.184.216.34"),
+        callback(null, "10.0.0.8"),
     );
-    resolvePinnedHostnameMock.mockResolvedValue({
+    resolvePinnedHostnameWithPolicyMock.mockResolvedValue({
       hostname: "provider.example",
-      addresses: ["93.184.216.34"],
+      addresses: ["10.0.0.8"],
       lookup: pinnedLookup,
     });
     const socket = new EventEmitter() as EventEmitter & { binaryType?: string };
@@ -360,8 +360,13 @@ describe("createDiscordGatewayPlugin", () => {
       });
     });
 
-    expect(address).toBe("93.184.216.34");
-    expect(resolvePinnedHostnameMock).toHaveBeenCalledWith("provider.example");
+    expect(address).toBe("10.0.0.8");
+    expect(resolvePinnedHostnameWithPolicyMock).toHaveBeenCalledWith("provider.example", {
+      policy: {
+        allowedHostnames: ["provider.example"],
+        hostnameAllowlist: ["provider.example"],
+      },
+    });
     expect(pinnedLookup).toHaveBeenCalledWith("provider.example", {}, expect.any(Function));
     expect(constructorSpy).toHaveBeenCalledWith(
       "wss://provider.example/socket?v=10&encoding=json",

@@ -6,7 +6,7 @@ const dnsMocks = vi.hoisted(() => ({
   lookup: vi.fn(),
 }));
 const ssrfMocks = vi.hoisted(() => ({
-  resolvePinnedHostname: vi.fn(),
+  resolvePinnedHostnameWithPolicy: vi.fn(),
 }));
 
 vi.mock("node:dns", async () => {
@@ -18,7 +18,7 @@ vi.mock("node:dns", async () => {
 });
 
 vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
-  resolvePinnedHostname: ssrfMocks.resolvePinnedHostname,
+  resolvePinnedHostnameWithPolicy: ssrfMocks.resolvePinnedHostnameWithPolicy,
 }));
 
 import { createDiscordDnsLookup, createDiscordProviderDnsLookup } from "./network-config.js";
@@ -26,7 +26,7 @@ import { createDiscordDnsLookup, createDiscordProviderDnsLookup } from "./networ
 describe("createDiscordDnsLookup", () => {
   afterEach(() => {
     dnsMocks.lookup.mockReset();
-    ssrfMocks.resolvePinnedHostname.mockReset();
+    ssrfMocks.resolvePinnedHostnameWithPolicy.mockReset();
   });
 
   it("returns reordered address arrays when the caller requests all addresses", async () => {
@@ -99,21 +99,21 @@ describe("createDiscordDnsLookup", () => {
     expect(dnsMocks.lookup).toHaveBeenCalledWith("example.com", options, callback);
   });
 
-  it("resolves and delegates provider lookups only through the pinned hostname", async () => {
+  it("allows private DNS only for the configured provider hostname", async () => {
     const options = { all: true };
     const pinnedLookup = vi.fn(
       (
         _hostname: string,
         _options: unknown,
         callback: (error: null, addresses: unknown[]) => void,
-      ) => callback(null, [{ address: "93.184.216.34", family: 4 }]),
+      ) => callback(null, [{ address: "10.0.0.8", family: 4 }]),
     );
-    ssrfMocks.resolvePinnedHostname.mockResolvedValue({
+    ssrfMocks.resolvePinnedHostnameWithPolicy.mockResolvedValue({
       hostname: "provider.example",
-      addresses: ["93.184.216.34"],
+      addresses: ["10.0.0.8"],
       lookup: pinnedLookup,
     });
-    const lookup = createDiscordProviderDnsLookup();
+    const lookup = createDiscordProviderDnsLookup("provider.example");
 
     const addresses = await new Promise<unknown>((resolve, reject) => {
       lookup("Provider.Example", options, (error, result) => {
@@ -125,17 +125,22 @@ describe("createDiscordDnsLookup", () => {
       });
     });
 
-    expect(ssrfMocks.resolvePinnedHostname).toHaveBeenCalledWith("Provider.Example");
+    expect(ssrfMocks.resolvePinnedHostnameWithPolicy).toHaveBeenCalledWith("Provider.Example", {
+      policy: {
+        allowedHostnames: ["provider.example"],
+        hostnameAllowlist: ["provider.example"],
+      },
+    });
     expect(pinnedLookup).toHaveBeenCalledWith("provider.example", options, expect.any(Function));
-    expect(addresses).toEqual([{ address: "93.184.216.34", family: 4 }]);
+    expect(addresses).toEqual([{ address: "10.0.0.8", family: 4 }]);
     expect(dnsMocks.lookup).not.toHaveBeenCalled();
   });
 
   it("reports blocked provider resolutions through the lookup callback", async () => {
-    ssrfMocks.resolvePinnedHostname.mockRejectedValue(
+    ssrfMocks.resolvePinnedHostnameWithPolicy.mockRejectedValue(
       "Blocked: resolves to private/internal address",
     );
-    const lookup = createDiscordProviderDnsLookup();
+    const lookup = createDiscordProviderDnsLookup("provider.example");
 
     const result = await new Promise<{ error: Error | null; address: unknown; family?: number }>(
       (resolve) => {
@@ -163,8 +168,10 @@ describe("createDiscordDnsLookup", () => {
     });
     const first = createPinned("93.184.216.34");
     const second = createPinned("93.184.216.35");
-    ssrfMocks.resolvePinnedHostname.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
-    const lookup = createDiscordProviderDnsLookup();
+    ssrfMocks.resolvePinnedHostnameWithPolicy
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second);
+    const lookup = createDiscordProviderDnsLookup("provider.example");
     const runLookup = () =>
       new Promise<string>((resolve, reject) => {
         lookup("provider.example", {}, (error, address) => {
@@ -183,7 +190,7 @@ describe("createDiscordDnsLookup", () => {
     await expect(runLookup()).resolves.toBe("93.184.216.34");
     await expect(runLookup()).resolves.toBe("93.184.216.35");
 
-    expect(ssrfMocks.resolvePinnedHostname).toHaveBeenCalledTimes(2);
+    expect(ssrfMocks.resolvePinnedHostnameWithPolicy).toHaveBeenCalledTimes(2);
     expect(first.lookup).toHaveBeenCalledOnce();
     expect(second.lookup).toHaveBeenCalledOnce();
     expect(dnsMocks.lookup).not.toHaveBeenCalled();

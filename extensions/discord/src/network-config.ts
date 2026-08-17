@@ -1,7 +1,7 @@
 // Discord helper module supports network config behavior.
 import * as dns from "node:dns";
 import type { LookupFunction } from "node:net";
-import { resolvePinnedHostname } from "openclaw/plugin-sdk/ssrf-runtime";
+import { resolvePinnedHostnameWithPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const DISCORD_DNS_HOSTS = ["discord.com", "discord.gg", "gateway.discord.gg"];
 
@@ -80,11 +80,20 @@ export function createDiscordDnsLookup(): LookupFunction {
   };
 }
 
-export function createDiscordProviderDnsLookup(): LookupFunction {
+export function createDiscordProviderDnsLookup(providerHostname: string): LookupFunction {
+  const normalizedProviderHostname = normalizeHostname(providerHostname);
+  if (!normalizedProviderHostname) {
+    throw new Error("Discord provider Gateway hostname is required");
+  }
+  const policy = {
+    allowedHostnames: [normalizedProviderHostname],
+    hostnameAllowlist: [normalizedProviderHostname],
+  };
+
   return (hostname, options, callback) => {
-    // Validate on every socket connect, then answer from the pinned lookup so DNS
-    // cannot change between the SSRF policy check and the outbound TCP connection.
-    void resolvePinnedHostname(hostname).then(
+    // Trust private DNS only for the configured Gateway host, then pin each socket
+    // so DNS cannot change between policy validation and the TCP connection.
+    void resolvePinnedHostnameWithPolicy(hostname, { policy }).then(
       (pinned) => pinned.lookup(pinned.hostname, options, callback),
       (error: unknown) => {
         callback(error instanceof Error ? error : new Error(String(error)), "", 4);
