@@ -1722,6 +1722,15 @@ function installControlUiMockGateway(
           sessionKey:
             isRecord(params) && typeof params.sessionKey === "string" ? params.sessionKey : "main",
         };
+      case "sessions.workspace.status":
+        return {
+          gitCheckout: scenario.workspaceGit,
+          root: scenario.workspace ?? "",
+          sessionKey:
+            isRecord(params) && typeof params.sessionKey === "string"
+              ? params.sessionKey
+              : scenario.sessionKey,
+        };
       case "sessions.files.get":
         return null;
       case "artifacts.list":

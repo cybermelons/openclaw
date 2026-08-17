@@ -241,6 +241,41 @@ describe("mock gateway stateful config", () => {
 });
 
 describe("mock gateway stateful sessions", () => {
+  it("returns workspace status from the generic mock contract", async () => {
+    const script = createControlUiMockGatewayInitScript({
+      sessionKey: "agent:main:mock-session",
+      workspace: "/tmp/mock-workspace",
+      workspaceGit: true,
+    });
+    window.sessionStorage.clear();
+    // oxlint-disable-next-line typescript/no-implied-eval -- Exercises the serialized browser fixture.
+    new Function(script)();
+
+    const socket = new WebSocket("ws://mock-gateway");
+    const frames: ResponseFrame[] = [];
+    socket.addEventListener("message", (event) => {
+      frames.push(JSON.parse(String((event as MessageEvent).data)) as ResponseFrame);
+    });
+    await flushMockTimers();
+
+    socket.send(
+      JSON.stringify({
+        type: "req",
+        id: "workspace-status",
+        method: "sessions.workspace.status",
+        params: { sessionKey: "agent:main:mock-session" },
+      }),
+    );
+    await flushMockTimers();
+
+    expect(frames.find((frame) => frame.id === "workspace-status")?.payload).toEqual({
+      gitCheckout: true,
+      root: "/tmp/mock-workspace",
+      sessionKey: "agent:main:mock-session",
+    });
+    socket.close();
+  });
+
   it("acknowledges broad session observation with the real Gateway response", async () => {
     const script = createControlUiMockGatewayInitScript({});
     window.sessionStorage.clear();
