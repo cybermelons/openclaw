@@ -473,7 +473,7 @@ export function refreshSessionWorkspace(
   if (!workspace || workspace.sessionKey !== state.sessionKey) {
     return;
   }
-  if (options?.expanded !== true && workspace.collapsed) {
+  if (options?.expanded === false || (options?.expanded !== true && workspace.collapsed)) {
     loadWorkspaceStatus(state, workspace, true);
     return;
   }

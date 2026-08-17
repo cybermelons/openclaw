@@ -52,6 +52,7 @@ import {
   reconcileChatRunFromSessionRow,
   reconcileStaleChatRunAfterSessionStatePublication,
 } from "./run-lifecycle.ts";
+import { isSidebarSlotVisible } from "./sidebar-layout.ts";
 import {
   preserveQueuedUserTurn,
   retirePersistedSteeredChips,
@@ -517,10 +518,9 @@ export function handlePageGatewayEvent(state: ChatPageHost, event: GatewayEventF
       removeDeliveredQueuedChatSendForRun(state, payload?.runId);
       void resumeStoredChatOutboxes(state);
       if (chatScopedEventSessionMatches(state, payload?.sessionKey, payload?.agentId)) {
-        const workspaceExpanded =
-          state.sidebarLayout.columns[0]?.panels.some((panel) => panel.slot === "workspace") ===
-          true;
-        refreshSessionWorkspace(state, { expanded: workspaceExpanded });
+        refreshSessionWorkspace(state, {
+          expanded: isSidebarSlotVisible(state.sidebarLayout, "workspace"),
+        });
       }
     }
     requestChatPageUpdate(state, payload?.state === "delta" ? "animation-frame" : "immediate");

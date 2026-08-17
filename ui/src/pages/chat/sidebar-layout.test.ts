@@ -4,6 +4,7 @@ import {
   activatePanel,
   closeSlot,
   fitSidebarLayout,
+  isSidebarSlotVisible,
   normalizeSidebarLayout,
   openSlot,
   reorderPanel,
@@ -44,6 +45,17 @@ describe("sidebar layout", () => {
     ]);
     expect(reopened.columns[0]?.activePanelId).toBe(chat.id);
     expect(activatePanel(layout, chat.id).columns[0]?.activePanelId).toBe(chat.id);
+  });
+
+  it("reports a slot visible only while its tab is active and the sidebar is open", () => {
+    const workspace = openSlot({ columns: [] }, "workspace");
+    const terminal = openSlot(workspace, "terminal");
+
+    expect(isSidebarSlotVisible(terminal, "workspace")).toBe(false);
+    expect(isSidebarSlotVisible(openSlot(terminal, "workspace"), "workspace")).toBe(true);
+    expect(
+      isSidebarSlotVisible(setSidebarOpen(openSlot(terminal, "workspace"), false), "workspace"),
+    ).toBe(false);
   });
 
   it("closes one tab and selects its nearest remaining neighbor", () => {
