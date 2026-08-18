@@ -39,6 +39,28 @@ import {
 const SESSION_REF_SEARCH_LIMIT = 20;
 const SESSION_REF_SEARCH_MAX_PAGES = 5;
 
+const CRON_RUN_SCOPE_SUFFIX_RE = /^cron:[^:]+:run:[^:]+$/iu;
+
+/**
+ * Cron jobs that reuse one session (heartbeat, memory-dreaming, intake-sweep) delete
+ * their per-run alias row (`agent:<id>:cron:<job>:run:<runId>`) once the run settles;
+ * only the durable job row (`agent:<id>:cron:<job>`) persists. A literal key shaped like
+ * a per-run alias therefore never resolves on its own — collapse it to the stable job
+ * key so the fallback below has a real row to find. Mirrors the server-side gate in
+ * `parseCronRunScopeSuffix` (src/sessions/session-key-utils.ts): only the exact
+ * `cron:<job>:run:<runId>` shape is collapsed, so a channel id merely containing
+ * `:run:` is left untouched.
+ */
+export function cronRunStableBaseKey(sessionKey: string | undefined | null): string | undefined {
+  const parsed = parseAgentSessionKey(sessionKey);
+  if (!parsed || !CRON_RUN_SCOPE_SUFFIX_RE.test(parsed.rest)) {
+    return undefined;
+  }
+  const runMarker = ":run:";
+  const markerIndex = sessionKey?.toLowerCase().lastIndexOf(runMarker) ?? -1;
+  return markerIndex > 0 ? sessionKey?.slice(0, markerIndex) : undefined;
+}
+
 type SessionCandidate = {
   agentId: string;
   displayName: string;
@@ -721,6 +743,34 @@ export async function loadChatRoute(
         preferenceDerived,
       });
       return literal ?? notFound({ routeId: face });
+    }
+    // A reuse-one-session cron job (heartbeat, memory-dreaming, intake-sweep) deletes its
+    // per-run alias row once the run settles, so neither the short-id lookup nor the
+    // literal retry above can ever find it by shortId alone: the job id that would let a
+    // fresh page load rediscover it is not encoded anywhere in the shortened URL. The
+    // in-app "open run chat" link therefore carries the full alias key it already knows
+    // through SESSION_NAVIGATION_KEY_PARAM (see sessionNavigationTarget's navigationKey);
+    // recover it here to collapse to the durable job row that persists after cleanup.
+    const carriedNavigationKey = new URLSearchParams(routeLocation.search)
+      .get(SESSION_NAVIGATION_KEY_PARAM)
+      ?.trim();
+    const cronBaseKey = cronRunStableBaseKey(carriedNavigationKey);
+    if (cronBaseKey) {
+      const baseResolution = await querySessionReference(
+        context,
+        { kind: "exact", value: cronBaseKey, agentId: target.agentId },
+        signal,
+      );
+      if (baseResolution?.kind === "unique") {
+        const base = resolvedSessionRouteData({
+          context,
+          location: routeLocation,
+          face,
+          row: baseResolution.session,
+          preferenceDerived,
+        });
+        return base ?? notFound({ routeId: face });
+      }
     }
     return notFound({ routeId: face });
   }

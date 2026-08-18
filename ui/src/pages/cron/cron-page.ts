@@ -509,6 +509,7 @@ class CronPage extends OpenClawLightDomElement {
                 context: this.context,
                 face: "chat",
                 sessionKey,
+                navigationKey: sessionKey,
               }).options,
             ),
         }),

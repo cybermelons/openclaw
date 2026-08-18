@@ -317,6 +317,7 @@ function renderRun(
           sessionKey: entry.sessionKey,
           fallbackAgentId,
           basePath,
+          navigationKey: entry.sessionKey,
         }).href
       : null;
   const status = runStatusLabel(entry.status ?? "unknown");

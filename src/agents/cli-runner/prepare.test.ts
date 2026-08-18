@@ -2394,7 +2394,7 @@ describe("prepareCliRunContext", () => {
     });
     expect(context.openClawHistoryPrompt).toBeUndefined();
     expect(context.params.prompt).toContain(
-      "OpenClaw resumed this CLI session after prompt content changed.",
+      "OpenClaw resumed this CLI session after available context changed.",
     );
     expect(context.params.prompt).toContain("changed=system-prompt");
     expect(context.params.prompt).toContain("latest ask");
@@ -2418,7 +2418,7 @@ describe("prepareCliRunContext", () => {
       invalidatedReason: "system-prompt",
     });
     expect(context.params.prompt).not.toContain(
-      "OpenClaw resumed this CLI session after prompt content changed.",
+      "OpenClaw resumed this CLI session after available context changed.",
     );
   });
 
