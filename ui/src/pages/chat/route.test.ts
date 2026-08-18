@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewaySessionRow, SessionsListResult } from "../../api/types.ts";
 import type { ApplicationContext } from "../../app/context.ts";
-import { loadChatRoute } from "./route-loader.ts";
+import { cronRunStableBaseKey, loadChatRoute } from "./route-loader.ts";
 
 const keyUuid = "12345678-90ab-cdef-1234-567890abcdef";
 const sessionKey = `agent:main:dashboard:${keyUuid}`;
@@ -65,7 +65,7 @@ function contextFor(listResult: SessionsListResult | null, mainKey = "main") {
       subscribe: vi.fn(() => () => undefined),
     },
     agents: { state: { agentsList: { mainKey } } },
-    sessions: { list },
+    sessions: { list, state: { result: null } },
   } as unknown as ApplicationContext;
   return { context, list, request };
 }
@@ -537,5 +537,76 @@ describe("loadChatRoute", () => {
       draft: undefined,
       face: "dashboard",
     });
+  });
+
+  it("collapses a not-found cron run alias to its stable job session via the carried navigation key", async () => {
+    // Cleaned class (heartbeat, memory-dreaming, intake-sweep): the per-run alias row is
+    // deleted once the run settles, so the short-id lookup and the literal retry both
+    // miss. The in-app "open run chat" link carries the full alias key through
+    // SESSION_NAVIGATION_KEY_PARAM; the loader must recover the durable job row from it.
+    const runKey = "agent:main:cron:892dc044:run:10122380-90ab-cdef-1234-567890abcdef";
+    const baseRow = row({ key: "agent:main:cron:892dc044", displayName: "Intake Sweep" });
+    const { context, list } = contextFor(result([baseRow]));
+    await expect(
+      loadChatRoute(
+        context,
+        {
+          pathname: "/chat/main/10122380",
+          search: `?__openclawSessionKey=${encodeURIComponent(runKey)}`,
+          hash: "",
+        },
+        "chat",
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({
+      kind: "session",
+      sessionKey: "agent:main:cron:892dc044",
+    });
+    expect(list).toHaveBeenCalled();
+  });
+
+  it("does not collapse to the base job when the per-run alias row still resolves (retained class)", async () => {
+    // Retained-per-run class: the alias row persists, so the short-id lookup resolves it
+    // directly. The base-collapse fallback must never be consulted here.
+    const runKey = "agent:main:cron:9a191cd7:run:10122380-90ab-cdef-1234-567890abcdef";
+    const runRow = row({ key: runKey, displayName: "Retained Run" });
+    const { context, list } = contextFor(result([runRow]));
+    await expect(
+      loadChatRoute(
+        context,
+        {
+          pathname: "/chat/main/10122380",
+          search: `?__openclawSessionKey=${encodeURIComponent(runKey)}`,
+          hash: "",
+        },
+        "chat",
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({
+      kind: "session",
+      sessionKey: runKey,
+    });
+    expect(list).not.toHaveBeenCalled();
+  });
+});
+
+describe("cronRunStableBaseKey", () => {
+  it("collapses an exact cron per-run alias to its stable job key", () => {
+    expect(cronRunStableBaseKey("agent:main:cron:nightly:run:8821")).toBe(
+      "agent:main:cron:nightly",
+    );
+  });
+
+  it("leaves a non-cron key that embeds :run: untouched", () => {
+    expect(cronRunStableBaseKey("agent:main:channel:run:8821")).toBeUndefined();
+  });
+
+  it("leaves a plain cron job key untouched", () => {
+    expect(cronRunStableBaseKey("agent:main:cron:nightly")).toBeUndefined();
+  });
+
+  it("returns undefined for a nullish key", () => {
+    expect(cronRunStableBaseKey(undefined)).toBeUndefined();
+    expect(cronRunStableBaseKey(null)).toBeUndefined();
   });
 });
