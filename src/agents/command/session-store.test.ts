@@ -32,6 +32,11 @@ vi.mock("../model-selection.js", () => ({
   normalizeProviderId: (provider: string) => provider.trim().toLowerCase(),
 }));
 
+const reconcileCliTranscriptMock = vi.hoisted(() => vi.fn().mockResolvedValue({ status: "noop" }));
+vi.mock("../cli-transcript-reconcile.js", () => ({
+  reconcileCliTranscript: reconcileCliTranscriptMock,
+}));
+
 type MockCost = {
   input?: number;
   output?: number;
@@ -136,6 +141,7 @@ function loadPersistedSessionEntry(
 
 afterEach(() => {
   closeOpenClawAgentDatabasesForTest();
+  reconcileCliTranscriptMock.mockClear();
 });
 
 type SessionStoreUpdateParams = Parameters<typeof updateSessionStoreAfterAgentRunBase>[0];
@@ -717,6 +723,20 @@ describe("updateSessionStoreAfterAgentRun", () => {
       expect(persisted[sessionKey]?.sessionId).toBe(sessionId);
       expect(persisted[sessionKey]?.cliSessionIds?.["claude-cli"]).toBe("cli-session-123");
       expect(persisted[sessionKey]?.claudeCliSessionId).toBe("cli-session-123");
+
+      expect(reconcileCliTranscriptMock).toHaveBeenCalledTimes(1);
+      expect(reconcileCliTranscriptMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey,
+          storePath,
+          reason: "resume",
+          entry: expect.objectContaining({
+            cliSessionBindings: expect.objectContaining({
+              "claude-cli": { sessionId: "cli-session-123" },
+            }),
+          }),
+        }),
+      );
     });
   });
 

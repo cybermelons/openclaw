@@ -12,6 +12,7 @@ import { patchSessionEntryCore } from "../../config/sessions/session-accessor.js
 import { projectSessionSnapshotChanges } from "../../config/sessions/session-snapshot-merge.js";
 import { resolveMaintenanceConfigFromInput } from "../../config/sessions/store-maintenance.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import {
   clearAllCliSessions,
@@ -20,11 +21,14 @@ import {
   setCliSessionBinding,
   setCliSessionId,
 } from "../cli-session.js";
+import { reconcileCliTranscript } from "../cli-transcript-reconcile.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import type { EmbeddedAgentCompactResult } from "../embedded-agent-runner/types.js";
 import { clearMainSessionRecoveryAfterAgentRun } from "../main-session-recovery/main-session-recovery-clear.js";
 import { isCliProvider } from "../model-selection.js";
 import { deriveSessionTotalTokens, hasNonzeroUsage } from "../usage.js";
+
+const log = createSubsystemLogger("agents/command/session-store");
 
 type RunResult = Awaited<ReturnType<(typeof import("../embedded-agent.js"))["runEmbeddedAgent"]>>;
 
@@ -319,6 +323,18 @@ export async function updateSessionStoreAfterAgentRun(params: {
   );
   if (persisted) {
     sessionStore[sessionKey] = persisted;
+  }
+  if (!preserveRuntimeModel && isCliProvider(providerUsed, cfg) && persisted) {
+    try {
+      await reconcileCliTranscript({
+        entry: persisted,
+        sessionKey,
+        storePath,
+        reason: "resume",
+      });
+    } catch (reconcileError) {
+      log.warn(`cli transcript reconcile failed for ${sessionKey}: ${String(reconcileError)}`);
+    }
   }
 }
 
