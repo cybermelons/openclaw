@@ -4,9 +4,14 @@
  * only ever existed in the ephemeral jsonl reader.
  */
 import fs from "node:fs";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
+import {
+  normalizeOptionalString,
+  readStringValue,
+} from "@openclaw/normalization-core/string-coerce";
 import type { SessionEntry } from "../config/sessions.js";
 import { getCliSessionBinding } from "../config/sessions/cli-session-binding.js";
+import { readRecentSessionTranscriptMessageEvents } from "../config/sessions/session-accessor.sqlite-active-events.js";
 import { applySessionEntryReplacements } from "../config/sessions/session-accessor.sqlite-projection.js";
 import {
   resolveSqliteScope,
@@ -19,6 +24,7 @@ import {
   readClaudeCliSessionMessages,
   resolveClaudeCliSessionFilePath,
 } from "../gateway/cli-session-history.claude.js";
+import { extractComparableText } from "../gateway/cli-session-history.merge.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runOpenClawAgentWriteTransaction } from "../state/openclaw-agent-db.js";
 import { setCliSessionBinding } from "./cli-session.js";
@@ -39,6 +45,88 @@ export type ReconcileCliTranscriptResult =
   | { status: "skipped"; reason: "no-binding" | "no-jsonl" | "error" }
   | { status: "noop" }
   | { status: "reconciled"; backfilled: number };
+
+type LocalTailEntry = {
+  role: string | undefined;
+  text: string | undefined;
+};
+
+function readMessageRole(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  return readStringValue((message as { role?: unknown }).role);
+}
+
+function readMessageTimestampMs(message: unknown): number | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  return asFiniteNumber((message as { timestamp?: unknown }).timestamp);
+}
+
+/**
+ * Reads the session's recent local transcript tail for backfill gating. The
+ * live mirror already persists normal turns, so the drain must only add rows
+ * the local store has no representation of.
+ */
+function readLocalTranscriptTail(scope: {
+  agentId?: string;
+  storePath?: string;
+  sessionKey?: string;
+  sessionId: string;
+}): { entries: LocalTailEntry[]; lastTimestampMs: number | undefined } {
+  const page = readRecentSessionTranscriptMessageEvents(scope, {
+    maxBytes: 4 * 1024 * 1024,
+    maxLines: 400,
+    maxMessages: 200,
+  });
+  const entries: LocalTailEntry[] = [];
+  let lastTimestampMs: number | undefined;
+  for (const entry of page.events) {
+    const event = entry.event as { message?: unknown } | undefined;
+    const message = event && typeof event === "object" ? event.message : undefined;
+    if (message === undefined) {
+      continue;
+    }
+    entries.push({ role: readMessageRole(message), text: extractComparableText(message) });
+    const timestampMs = readMessageTimestampMs(message);
+    if (timestampMs !== undefined) {
+      lastTimestampMs =
+        lastTimestampMs === undefined ? timestampMs : Math.max(lastTimestampMs, timestampMs);
+    }
+  }
+  return { entries, lastTimestampMs };
+}
+
+/**
+ * True when the local tail already represents this jsonl message. Two guards:
+ * a timestamp watermark (rows at or before the newest local row were part of
+ * an already-persisted turn) and a text containment check (the live mirror
+ * stores a turn's assistant text as one concatenated record, so jsonl
+ * fragments of it must not re-append).
+ */
+function isRepresentedInLocalTail(
+  message: unknown,
+  tail: { entries: LocalTailEntry[]; lastTimestampMs: number | undefined },
+): boolean {
+  const timestampMs = readMessageTimestampMs(message);
+  if (
+    timestampMs !== undefined &&
+    tail.lastTimestampMs !== undefined &&
+    timestampMs <= tail.lastTimestampMs
+  ) {
+    return true;
+  }
+  const role = readMessageRole(message);
+  const text = extractComparableText(message);
+  if (!text) {
+    return false;
+  }
+  return tail.entries.some(
+    (entry) => entry.role === role && entry.text !== undefined && entry.text.includes(text),
+  );
+}
 
 function readMessageExternalId(message: unknown): string | undefined {
   if (!message || typeof message !== "object") {
@@ -106,9 +194,25 @@ export async function reconcileCliTranscript(
 
     let backfilled = 0;
     await runExclusiveSqliteSessionWrite(resolved, async () => {
+      // Gate on the local tail: the live mirror persists normal turns itself,
+      // so the drain backfills only rows with no local representation
+      // (in-flight turns lost to a crash). Without this gate every drained
+      // row duplicates its mirrored counterpart under a second eventId
+      // namespace. Read inside the exclusive lock so a concurrent turn cannot
+      // append between the gate and the write.
+      const localTail = readLocalTranscriptTail({
+        ...resolved,
+        sessionId: params.entry.sessionId,
+      });
+      const candidates = messages.filter(
+        (message) => !isRepresentedInLocalTail(message, localTail),
+      );
+      if (candidates.length === 0) {
+        return;
+      }
       runOpenClawAgentWriteTransaction((database) => {
         const transcriptScope = { ...resolved, sessionId: params.entry.sessionId };
-        for (const message of messages) {
+        for (const message of candidates) {
           const uuid = readMessageExternalId(message);
           if (!uuid) {
             // No stable external id to dedup on: skip rather than fabricate one.

@@ -317,6 +317,11 @@ export function parseClaudeCliHistoryEntry(
   if (entry.isSidechain === true || !entry.message || typeof entry.message !== "object") {
     return null;
   }
+  // Meta rows are harness-injected context (skill payload injections, command
+  // wrappers), not chat turns; surfacing them leaks internals into history.
+  if (entry.isMeta === true) {
+    return null;
+  }
   const type = typeof entry.type === "string" ? entry.type : undefined;
   const role = typeof entry.message.role === "string" ? entry.message.role : undefined;
   if ((type !== "user" && type !== "assistant") || role !== type) {

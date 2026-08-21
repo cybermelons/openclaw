@@ -10,7 +10,7 @@ import { stripInlineDirectiveTagsForDisplay } from "../utils/directive-tags.js";
 
 const DEDUPE_TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
 
-function extractComparableText(message: unknown): string | undefined {
+export function extractComparableText(message: unknown): string | undefined {
   if (!message || typeof message !== "object") {
     return undefined;
   }

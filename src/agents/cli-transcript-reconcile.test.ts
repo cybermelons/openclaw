@@ -5,11 +5,17 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { SessionEntry } from "../config/sessions.js";
+import {
+  resolveSqliteScope,
+  toDatabaseOptions,
+} from "../config/sessions/session-accessor.sqlite-scope.js";
+import { appendTranscriptMessageInTransaction } from "../config/sessions/session-accessor.sqlite-transcript-message-append.js";
 import { CLAUDE_CLI_PROVIDER } from "../gateway/cli-session-history.claude.js";
 import {
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
+import { runOpenClawAgentWriteTransaction } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { setCliSessionBinding } from "./cli-session.js";
@@ -169,6 +175,137 @@ describe("reconcileCliTranscript", () => {
           sessionId: entry.sessionId,
         });
         expect(count).toBe(3);
+      },
+    );
+  });
+
+  function appendLocalMirrorRow(params: {
+    env: NodeJS.ProcessEnv;
+    sessionKey: string;
+    sessionId: string;
+    eventId: string;
+    message: { role: string; content: unknown; timestamp: number };
+  }): void {
+    const resolved = resolveSqliteScope({
+      agentId: "main",
+      env: params.env,
+      sessionKey: params.sessionKey,
+    });
+    runOpenClawAgentWriteTransaction((database) => {
+      appendTranscriptMessageInTransaction(
+        database,
+        { ...resolved, sessionId: params.sessionId },
+        { message: params.message, eventId: params.eventId },
+      );
+    }, toDatabaseOptions(resolved));
+  }
+
+  it("does not re-append turns the live mirror already persisted (timestamp watermark)", async () => {
+    // jsonl rows carry 2026-03-26 timestamps; the mirror rows below are newer,
+    // so every jsonl row belongs to an already-persisted turn.
+    await withClaudeProjectsDir(
+      [
+        { role: "user", uuid: "user-1", content: 'Use the "demo" skill for this request.' },
+        { role: "assistant", uuid: "assistant-1", content: "I'll load the skill." },
+        { role: "assistant", uuid: "assistant-2", content: "Full final answer." },
+      ],
+      async ({ homeDir, sessionId }) => {
+        const entry: SessionEntry = {
+          sessionId: "openclaw-local-session-mirrored",
+          updatedAt: Date.now(),
+        };
+        setCliSessionBinding(entry, CLAUDE_CLI_PROVIDER, { sessionId });
+        const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+        const sessionKey = "agent:main:openclaw-local-session-mirrored";
+
+        appendLocalMirrorRow({
+          env,
+          sessionKey,
+          sessionId: entry.sessionId,
+          eventId: "mirror-user-1",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "/demo" }],
+            timestamp: Date.now(),
+          },
+        });
+        appendLocalMirrorRow({
+          env,
+          sessionKey,
+          sessionId: entry.sessionId,
+          eventId: "mirror-assistant-1",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "I'll load the skill.\n\nFull final answer." }],
+            timestamp: Date.now(),
+          },
+        });
+
+        const result = await reconcileCliTranscript({
+          entry,
+          sessionKey,
+          agentId: "main",
+          env,
+          homeDir,
+        });
+        expect(result).toMatchObject({ status: "reconciled", backfilled: 0 });
+
+        const count = countTranscriptMessageEvents({
+          agentId: "main",
+          env,
+          sessionId: entry.sessionId,
+        });
+        expect(count).toBe(2);
+      },
+    );
+  });
+
+  it("skips newer jsonl fragments contained in a local record but backfills genuinely new rows", async () => {
+    // Mirror assistant record is OLDER than the jsonl rows (crash-recovery
+    // shape). The fragment duplicates part of the mirrored concatenated text
+    // and must not re-append; the unrelated new row must backfill.
+    const jsonlBaseTs = Date.parse("2026-03-26T16:29:54.800Z");
+    await withClaudeProjectsDir(
+      [
+        { role: "assistant", uuid: "fragment-1", content: "I'll load the skill." },
+        { role: "assistant", uuid: "new-turn-1", content: "Recovered in-flight answer." },
+      ],
+      async ({ homeDir, sessionId }) => {
+        const entry: SessionEntry = {
+          sessionId: "openclaw-local-session-fragment",
+          updatedAt: Date.now(),
+        };
+        setCliSessionBinding(entry, CLAUDE_CLI_PROVIDER, { sessionId });
+        const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+        const sessionKey = "agent:main:openclaw-local-session-fragment";
+
+        appendLocalMirrorRow({
+          env,
+          sessionKey,
+          sessionId: entry.sessionId,
+          eventId: "mirror-assistant-old",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "I'll load the skill.\n\nEarlier full answer." }],
+            timestamp: jsonlBaseTs - 60_000,
+          },
+        });
+
+        const result = await reconcileCliTranscript({
+          entry,
+          sessionKey,
+          agentId: "main",
+          env,
+          homeDir,
+        });
+        expect(result).toMatchObject({ status: "reconciled", backfilled: 1 });
+
+        const count = countTranscriptMessageEvents({
+          agentId: "main",
+          env,
+          sessionId: entry.sessionId,
+        });
+        expect(count).toBe(2);
       },
     );
   });

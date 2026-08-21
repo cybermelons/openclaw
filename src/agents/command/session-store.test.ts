@@ -724,19 +724,9 @@ describe("updateSessionStoreAfterAgentRun", () => {
       expect(persisted[sessionKey]?.cliSessionIds?.["claude-cli"]).toBe("cli-session-123");
       expect(persisted[sessionKey]?.claudeCliSessionId).toBe("cli-session-123");
 
-      expect(reconcileCliTranscriptMock).toHaveBeenCalledTimes(1);
-      expect(reconcileCliTranscriptMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sessionKey,
-          storePath,
-          reason: "resume",
-          entry: expect.objectContaining({
-            cliSessionBindings: expect.objectContaining({
-              "claude-cli": { sessionId: "cli-session-123" },
-            }),
-          }),
-        }),
-      );
+      // The live mirror persists the turn's records; a post-turn drain would
+      // duplicate them, so the finalize path must not reconcile.
+      expect(reconcileCliTranscriptMock).not.toHaveBeenCalled();
     });
   });
 

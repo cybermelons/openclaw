@@ -100,6 +100,18 @@ function createClaudeHistoryLines(sessionId: string) {
           'Sender: ⟦openclaw:ctx⟧\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Thu 2026-03-26 16:29 GMT] hi',
       },
     }),
+    // Meta rows (skill payload injections, command wrappers) must never
+    // surface as chat turns; the reader drops them.
+    JSON.stringify({
+      type: "user",
+      uuid: "meta-1",
+      isMeta: true,
+      timestamp: "2026-03-26T16:29:55.100Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "Base directory for this skill: /tmp/skill" }],
+      },
+    }),
     JSON.stringify({
       type: "assistant",
       uuid: "assistant-1",
