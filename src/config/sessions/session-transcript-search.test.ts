@@ -273,6 +273,18 @@ describe("searchSessionTranscripts", () => {
     );
     expect(pending()).toEqual(["session-1"]);
 
+    // Rewound watermark: external row deletion moved the newest seq below
+    // indexed_seq. The read gate requires exact equality, so this session must
+    // be a candidate or history serving livelocks as permanently unavailable.
+    executeSqliteQuerySync(
+      db,
+      kysely
+        .updateTable("session_transcript_index_state")
+        .set({ indexed_seq: 999_999, needs_rebuild: 0 })
+        .where("session_id", "=", "session-1"),
+    );
+    expect(pending()).toEqual(["session-1"]);
+
     executeSqliteQuerySync(
       db,
       kysely.deleteFrom("session_transcript_index_state").where("session_id", "=", "session-1"),

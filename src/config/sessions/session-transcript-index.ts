@@ -456,7 +456,11 @@ export function listSessionsNeedingTranscriptIndexReconcile(db: DatabaseSync): s
       .where((eb) =>
         eb.or([
           eb(eb.fn.coalesce("st.needs_rebuild", eb.val(1)), "!=", 0),
-          eb("latest.seq", ">", eb.fn.coalesce("st.indexed_seq", eb.val(-1))),
+          // "!=" not ">": external row deletion (purge/doctor tools) can move the
+          // newest seq BELOW the watermark. The read gate requires exact equality,
+          // so a rewound session must be a reconcile candidate or history serving
+          // livelocks on SessionTranscriptProjectionUnavailableError.
+          eb("latest.seq", "!=", eb.fn.coalesce("st.indexed_seq", eb.val(-1))),
         ]),
       )
       // The transcript PK makes the correlated latest-row lookup one index seek per session.
