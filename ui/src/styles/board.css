@@ -13,6 +13,37 @@ openclaw-board-view {
   position: relative;
 }
 
+.board-view__lock-toggle {
+  align-items: center;
+  background: var(--board-surface);
+  border: 1px solid var(--board-line);
+  border-radius: 999px;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  height: 30px;
+  justify-content: center;
+  opacity: 0.35;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
+  width: 30px;
+  z-index: 2;
+}
+
+.board-view__lock-toggle:hover,
+.board-view__lock-toggle:focus-visible {
+  opacity: 1;
+}
+
+.board-view__lock-toggle--locked {
+  background: color-mix(in srgb, var(--accent) 14%, var(--board-surface));
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--board-line));
+}
+
 .board-view__error {
   background: color-mix(in srgb, var(--danger) 8%, var(--panel));
   border: 1px solid color-mix(in srgb, var(--danger) 42%, transparent);

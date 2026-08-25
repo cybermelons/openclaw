@@ -77,6 +77,7 @@ class OpenClawBoardWidgetCell extends OpenClawLightDomElement {
   @property({ type: Boolean }) busy = false;
   @property({ type: Boolean }) canMutate = true;
   @property({ type: Boolean }) canGrant = true;
+  @property({ type: Boolean }) layoutLocked = false;
 
   @state() private actionError = "";
   @state() private actionPending = false;
@@ -400,6 +401,7 @@ class OpenClawBoardWidgetCell extends OpenClawLightDomElement {
     }
     const label = widget.title || widget.name;
     const readOnly = !this.canMutate;
+    const handlesHidden = readOnly || this.layoutLocked;
     const bodyScrollable =
       bodyErrored ||
       this.actionError !== "" ||
@@ -435,7 +437,7 @@ class OpenClawBoardWidgetCell extends OpenClawLightDomElement {
         @keydown=${(event: KeyboardEvent) => this.handleKeyDown(event, widget, callbacks)}
       >
         <header class="board-widget__bar">
-          ${readOnly
+          ${handlesHidden
             ? nothing
             : html`<span
                 class="board-widget__drag-handle"
@@ -454,7 +456,7 @@ class OpenClawBoardWidgetCell extends OpenClawLightDomElement {
                 : t("board.widget.kindHtml")}</span
           >
           ${renderBoardGrantedCapabilities(widget)}
-          ${readOnly
+          ${handlesHidden
             ? nothing
             : renderBoardWidgetMenu({
                 widget,
@@ -473,7 +475,7 @@ class OpenClawBoardWidgetCell extends OpenClawLightDomElement {
               </div>`
             : nothing}
         </div>
-        ${readOnly
+        ${handlesHidden
           ? nothing
           : html`<span
               class="board-widget__resize-handle"

@@ -24,6 +24,7 @@ import type {
   BoardWidgetFrameUrl,
 } from "../../lib/board/view-types.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
+import { getSafeLocalStorage } from "../../local-storage.ts";
 import "../../styles/board.css";
 import "../web-awesome-tabs.ts";
 import "../web-awesome.ts";
@@ -86,6 +87,9 @@ class OpenClawBoardView extends OpenClawLightDomElement {
   @state() private actionError = "";
   @state() private focusName = "";
   @state() private mutationPending = false;
+  @state() private layoutLocked = false;
+
+  private layoutLockSessionKey = "";
 
   private gesture: BoardPointerGesture | null = null;
   private mutationRequestId = 0;
@@ -114,6 +118,7 @@ class OpenClawBoardView extends OpenClawLightDomElement {
         this.stableCellOrder.clear();
         this.stableCellOrderSequence = 0;
         this.contentHeights.clear();
+        this.loadLayoutLocked();
       } else if (previousSnapshot && this.snapshot) {
         const previousByName = new Map(
           previousSnapshot.widgets.map((widget) => [widget.name, widget]),
@@ -152,6 +157,41 @@ class OpenClawBoardView extends OpenClawLightDomElement {
 
   private activeTab(tabs: readonly BoardTab[]): BoardTab | undefined {
     return tabs.find((tab) => tab.tabId === this.activeTabId) ?? tabs[0];
+  }
+
+  private layoutLockStorageKey(sessionKey: string): string {
+    return `openclaw.board.layoutLocked.${sessionKey}`;
+  }
+
+  private loadLayoutLocked(): void {
+    const sessionKey = this.snapshot?.sessionKey ?? "";
+    this.layoutLockSessionKey = sessionKey;
+    const storage = getSafeLocalStorage();
+    if (!storage || !sessionKey) {
+      this.layoutLocked = false;
+      return;
+    }
+    try {
+      this.layoutLocked = storage.getItem(this.layoutLockStorageKey(sessionKey)) === "1";
+    } catch {
+      this.layoutLocked = false;
+    }
+  }
+
+  private toggleLayoutLock(): void {
+    const sessionKey = this.snapshot?.sessionKey ?? this.layoutLockSessionKey;
+    this.layoutLocked = !this.layoutLocked;
+    const storage = getSafeLocalStorage();
+    if (!storage || !sessionKey) {
+      return;
+    }
+    try {
+      storage.setItem(this.layoutLockStorageKey(sessionKey), this.layoutLocked ? "1" : "0");
+    } catch {
+      // Storage can throw when quota is exceeded or access is blocked; the lock
+      // still applies for the current session, it just will not persist.
+    }
+    this.requestUpdate();
   }
 
   private announce(message: string): void {
@@ -671,6 +711,7 @@ class OpenClawBoardView extends OpenClawLightDomElement {
                 .busy=${this.mutationPending}
                 .canMutate=${this.canMutate}
                 .canGrant=${this.canGrant}
+                .layoutLocked=${this.layoutLocked}
               ></openclaw-board-widget-cell>
             `;
           },
@@ -694,6 +735,18 @@ class OpenClawBoardView extends OpenClawLightDomElement {
     return html`
       <section class="board-view" aria-label=${t("board.label")}>
         ${this.renderTabs(tabs, activeTabId)} ${this.renderGrid(widgets, tabs, snapshot.sessionKey)}
+        ${this.canMutate
+          ? html`<button
+              type="button"
+              class=${`board-view__lock-toggle ${this.layoutLocked ? "board-view__lock-toggle--locked" : ""}`}
+              aria-label=${t("board.lockLayout")}
+              aria-pressed=${this.layoutLocked}
+              title=${this.layoutLocked ? t("board.layoutLockedTooltip") : t("board.lockLayout")}
+              @click=${() => this.toggleLayoutLock()}
+            >
+              <span aria-hidden="true">${this.layoutLocked ? "🔒" : "🔓"}</span>
+            </button>`
+          : nothing}
         ${this.actionError
           ? html`<div class="board-view__error" role="alert">${this.actionError}</div>`
           : nothing}

@@ -3962,6 +3962,8 @@ export const en: TranslationMap = {
     emptyHint: "Your agent can pin widgets here — try asking for a status card.",
     actionFailed: "The dashboard change could not be saved.",
     actionInProgress: "Another dashboard change is still being saved.",
+    lockLayout: "Lock layout",
+    layoutLockedTooltip: "Layout locked — click to unlock. Widget menus are hidden while locked.",
     announcement: {
       moved: "Moved {title}.",
       resized: "Resized {title}.",
