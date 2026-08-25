@@ -67,6 +67,7 @@ import {
   openSessionWorkspaceFile,
   renderSessionWorkspaceRail,
   revealSessionWorkspaceFile,
+  runBamOnFile,
 } from "./components/chat-session-workspace.ts";
 import { activeQueuedMessageEdit } from "./queued-message-edit.ts";
 import { hasAbortableSessionRun } from "./run-lifecycle.ts";
@@ -497,6 +498,7 @@ export class ChatPane extends ChatPaneBrowserAnnotationRender {
         void this.acceptTaskSuggestion(suggestion, mode, cloudProfileId),
       onDismissTaskSuggestion: (suggestion) => void this.dismissTaskSuggestion(suggestion),
       onOpenWorkspaceFile: (target) => openSessionWorkspaceFile(state, target),
+      onBamFile: (target) => runBamOnFile(state, target),
       onOpenSessionLink: (target) => navigateMarkdownSession(this.context, target),
       onRevealWorkspaceFile: (path) => revealSessionWorkspaceFile(state, path),
       onRefresh: () => {

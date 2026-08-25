@@ -13,6 +13,7 @@ export * from "./schema/skill-history.js";
 export * from "./schema/ui-command.js";
 export * from "./schema/board.js";
 export * from "./schema/progress-card.js";
+export * from "./schema/workspace.js";
 export {
   SessionCreatedActorSchema,
   SessionPermissionModeSchema,

@@ -103,6 +103,7 @@ export type ChatThreadProps = {
   realtimeTalkConversation?: RealtimeTalkConversationEntry[];
   onOpenSidebar?: (content: SidebarContent) => void;
   onOpenWorkspaceFile?: (target: { path: string; line?: number | null }) => void;
+  onBamFile?: (target: { path: string; line: number | null }) => void;
   onOpenSessionLink?: (target: SessionLinkTarget) => void;
   onOpenSessionCheckpoints?: () => void | Promise<void>;
   onAssistantAttachmentLoaded?: () => void;

@@ -237,6 +237,7 @@ export type ChatProps = ChatTaskSuggestionTrayProps &
     onSessionSelect?: (sessionKey: string) => void;
     onOpenSidebar?: (content: SidebarContent) => void;
     onOpenWorkspaceFile?: (target: { path: string; line?: number | null }) => void;
+    onBamFile?: (target: { path: string; line: number | null }) => void;
     onOpenSessionLink?: (target: SessionLinkTarget) => void;
     onRevealWorkspaceFile?: (path: string) => void;
     onChatScroll?: (event: Event) => void;
@@ -335,6 +336,7 @@ export function renderChat(props: ChatProps) {
       realtimeTalkConversation: props.realtimeTalkConversation,
       onOpenSidebar: props.onOpenSidebar,
       onOpenWorkspaceFile: props.onOpenWorkspaceFile,
+      onBamFile: props.onBamFile,
       onOpenSessionLink: props.onOpenSessionLink,
       onOpenSessionCheckpoints: props.onOpenSessionCheckpoints,
       onAssistantAttachmentLoaded: props.onAssistantAttachmentLoaded,

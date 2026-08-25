@@ -3,6 +3,7 @@ import { html, nothing, type TemplateResult } from "lit";
 import { sessionRefFromPath } from "../../../app-session-route-paths.ts";
 import { handleMarkdownCodeBlockCopy } from "../../../components/markdown-code-blocks.ts";
 import {
+  markdownFileBamFromEvent,
   markdownFileLinkFromEvent,
   markdownFileLinkFromKeyboardEvent,
 } from "../../../components/markdown-file-links.ts";
@@ -146,6 +147,12 @@ function renderTranscriptShell(
       @touchend=${props.onHistoryIntent}
       @touchcancel=${props.onHistoryIntent}
       @click=${(event: MouseEvent) => {
+        const bam = markdownFileBamFromEvent(event);
+        if (bam) {
+          event.preventDefault();
+          props.onBamFile?.(bam);
+          return;
+        }
         handleMarkdownCodeBlockCopy(event);
         const target = markdownFileLinkFromEvent(event);
         if (target) {

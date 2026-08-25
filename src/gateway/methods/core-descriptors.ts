@@ -183,6 +183,7 @@ const CORE_GATEWAY_METHOD_SPECS = [
   // Workspace file writes require the same admin scope as agents.files.set.
   ["sessions.files.set", "sessions-files", "operator.admin", "<=2026.7"],
   ["sessions.files.reveal", "sessions-files", "operator.admin", "<=2026.7"],
+  ["workspace.runBam", "workspace", "operator.write", "2026.8"],
   ["artifacts.list", "artifacts", "operator.read", "<=2026.7"],
   ["artifacts.get", "artifacts", "operator.read", "<=2026.7"],
   ["artifacts.download", "artifacts", "operator.read", "<=2026.7"],

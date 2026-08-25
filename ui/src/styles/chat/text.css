@@ -401,6 +401,23 @@
   text-underline-offset: 3px;
 }
 
+/* Hover "bam" button: opens the file in Marc's nvim instead of the sidebar.
+   opacity (not visibility) keeps it hoverable while hidden — visibility:hidden
+   drops out of hover targeting entirely, so the button would never reveal
+   itself on its own :hover. Margin carries the spacing to the anchor so there
+   is no dead gap that would break the adjacent-sibling hover chain below. */
+:is(.chat-text, .sidebar-markdown) button.markdown-file-bam {
+  opacity: 0;
+  pointer-events: auto;
+  user-select: none;
+  margin-left: 0.25em;
+}
+
+:is(.chat-text, .sidebar-markdown) a.markdown-file-link:hover + button.markdown-file-bam,
+:is(.chat-text, .sidebar-markdown) button.markdown-file-bam:hover {
+  opacity: 1;
+}
+
 /* A recognized workspace path carries a glyph for its file type, so a file
    reference is identifiable before its label is read — the label itself is only
    the basename. Painted as a masked ::before like the GitHub mark above: it
