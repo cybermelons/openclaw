@@ -4949,6 +4949,7 @@ export const en: TranslationMap = {
       chatFace: "Chat",
       splitFace: "Split",
       dashboardFace: "Dashboard",
+      hiddenFace: "Hidden",
       dockMenu: "Chat dock: {dock}",
       dockLeft: "Dock chat left",
       dockRight: "Dock chat right",

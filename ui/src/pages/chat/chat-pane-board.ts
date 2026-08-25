@@ -292,11 +292,15 @@ export abstract class ChatPaneBoard extends ChatPaneHistory {
     if (dock !== "hidden") {
       this.lastVisibleBoardDock.set(dockKey, dock);
     }
+    // Explicit dashboard-route navigation always wins over a persisted hidden bit,
+    // so a shared /dashboard-namespace link never lands on a hidden panel.
+    const hidden = this.routeFace !== "dashboard" && saved?.hidden === true;
     return {
       provider,
       snapshot,
       hasBoard,
       face: hasBoard ? this.routeFace : "chat",
+      hidden,
       activeTabId,
       dock,
       reopenDock:

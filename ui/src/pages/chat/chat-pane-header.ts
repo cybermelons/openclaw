@@ -408,20 +408,26 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
         hasBoard: board.hasBoard,
         face: board.face,
         dock: board.dock,
+        hidden: board.hidden,
         canChangeDock: canChangeBoardDock,
         onSelectMode: (mode) => {
+          if (mode === "hidden") {
+            this.syncChatSidebarForDock("hidden");
+            this.persistBoardSessionView({ face: "chat", hidden: true });
+            return;
+          }
           if (!canChangeBoardDock) {
             const face = mode === "chat" ? "chat" : "dashboard";
             this.syncChatSidebarForDock(face === "dashboard" ? board.dock : "hidden");
-            this.persistBoardSessionView({ face });
+            this.persistBoardSessionView({ face, hidden: false });
             return;
           }
           if (mode === "chat") {
             this.syncChatSidebarForDock("hidden");
-            this.persistBoardSessionView({ face: "chat" });
+            this.persistBoardSessionView({ face: "chat", hidden: false });
             return;
           }
-          this.persistBoardSessionView({ face: "dashboard" });
+          this.persistBoardSessionView({ face: "dashboard", hidden: false });
           if (mode === "split") {
             if (board.dock === "hidden") {
               this.handleBoardDockChange(board.reopenDock);
