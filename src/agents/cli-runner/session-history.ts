@@ -11,7 +11,10 @@ import {
   resolveSessionFilePathCore,
   resolveSessionFilePathOptions,
 } from "../../config/sessions/paths.js";
-import { readSessionTranscriptMessageEvents } from "../../config/sessions/session-accessor.sqlite-active-events.js";
+import {
+  isSessionTranscriptProjectionUnavailableError,
+  readSessionTranscriptMessageEvents,
+} from "../../config/sessions/session-accessor.sqlite-active-events.js";
 import {
   parseSessionTranscriptTreeEntry,
   scanSessionTranscriptTree,
@@ -491,30 +494,72 @@ function resolveSafeCliSessionFile(params: {
  * resolver then derives a .jsonl path that never exists. Gating on the sentinel
  * silently skipped the store for exactly the sessions that live in it.
  */
-function readSqliteCliSessionEntries(params: {
+// Retry budget for a transient projection lag on resume: the throw site already
+// kicks the reconcile job, so this just waits for it to catch up instead of
+// reseeding a blank prompt. Hard caps on both attempts and wall clock so a
+// resume turn can never hang on this.
+const PROJECTION_RETRY_MAX_ATTEMPTS = 3;
+const PROJECTION_RETRY_BACKOFF_MS = 200;
+const PROJECTION_RETRY_BUDGET_MS = 2000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readSqliteCliSessionEntriesOnce(params: {
   sessionId: string;
   sessionFile: string;
   sessionKey?: string;
   agentId?: string;
 }): unknown[] | undefined {
-  try {
-    const rows = readSessionTranscriptMessageEvents({
-      sessionId: params.sessionId,
-      ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
-      ...(params.agentId ? { agentId: params.agentId } : {}),
-    });
-    // Store rows are {event, seq} envelopes; downstream projection expects the bare
-    // transcript entries the file reader yields, so unwrap before returning.
-    const entries = rows.flatMap((row) => {
-      const event = isRecord(row) ? row.event : undefined;
-      return event === undefined ? [] : [event];
-    });
-    return entries.length > 0 ? entries : undefined;
-  } catch (error) {
-    // Never break history loading on a store read; fall through to the file reader.
-    cliBackendLog.warn(`sqlite cli session history read failed: ${formatErrorMessage(error)}`);
-    return undefined;
+  const rows = readSessionTranscriptMessageEvents({
+    sessionId: params.sessionId,
+    ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+    ...(params.agentId ? { agentId: params.agentId } : {}),
+  });
+  // Store rows are {event, seq} envelopes; downstream projection expects the bare
+  // transcript entries the file reader yields, so unwrap before returning.
+  const entries = rows.flatMap((row) => {
+    const event = isRecord(row) ? row.event : undefined;
+    return event === undefined ? [] : [event];
+  });
+  return entries.length > 0 ? entries : undefined;
+}
+
+async function readSqliteCliSessionEntries(params: {
+  sessionId: string;
+  sessionFile: string;
+  sessionKey?: string;
+  agentId?: string;
+}): Promise<unknown[] | undefined> {
+  const startedAt = Date.now();
+  for (let attempt = 1; attempt <= PROJECTION_RETRY_MAX_ATTEMPTS; attempt++) {
+    try {
+      return readSqliteCliSessionEntriesOnce(params);
+    } catch (error) {
+      if (!isSessionTranscriptProjectionUnavailableError(error)) {
+        // Never break history loading on a store read; fall through to the file reader.
+        cliBackendLog.warn(
+          `sqlite cli session history read failed: ${formatErrorMessage(error)}`,
+        );
+        return undefined;
+      }
+      // Transient projection lag: the throw site already kicked the reconcile job,
+      // so just wait for it to catch up and re-read, instead of reseeding blank
+      // context. Bail to the same fallback as any other error once the attempt
+      // count or wall-clock budget is exhausted.
+      const elapsedMs = Date.now() - startedAt;
+      const remainingBudgetMs = PROJECTION_RETRY_BUDGET_MS - elapsedMs;
+      if (attempt >= PROJECTION_RETRY_MAX_ATTEMPTS || remainingBudgetMs <= 0) {
+        cliBackendLog.warn(
+          `sqlite cli session history read failed: ${formatErrorMessage(error)}`,
+        );
+        return undefined;
+      }
+      await sleep(Math.min(PROJECTION_RETRY_BACKOFF_MS, remainingBudgetMs));
+    }
   }
+  return undefined;
 }
 
 async function loadCliSessionEntries(params: {
@@ -531,7 +576,7 @@ async function loadCliSessionEntries(params: {
     // through the silent catch. Read the canonical store first: without this, resuming
     // a session whose transcript lives only in SQLite reseeds nothing, and the chat
     // starts cold even though its full history is present.
-    const sqliteEntries = readSqliteCliSessionEntries(params);
+    const sqliteEntries = await readSqliteCliSessionEntries(params);
     if (sqliteEntries) {
       return projectLatestCliHistoryBoundary(
         selectSessionTranscriptLeafControlledPath(sqliteEntries) ?? sqliteEntries,
@@ -634,7 +679,7 @@ export async function hasCliSessionTranscript(params: {
     const { sessionFile, sessionsDir } = resolveSafeCliSessionFile(params);
     // Same sentinel branch as the loader: a SQLite-backed session has no file, so the
     // filesystem probe below would report "no transcript" for a session that has one.
-    const sqliteEntries = readSqliteCliSessionEntries(params);
+    const sqliteEntries = await readSqliteCliSessionEntries(params);
     if (sqliteEntries) {
       return sqliteEntries.length > 0;
     }
