@@ -261,10 +261,10 @@ describe("normalizeCronJobCreate", () => {
     expect(delivery.to).toBe("123");
     expect(validateCronAddParams(normalized)).toBe(false);
   });
-  it("defaults isolated agentTurn delivery to announce", () => {
-    expect(child(createAgent(), "delivery").mode).toBe("announce");
+  it("leaves isolated agentTurn delivery unset by default", () => {
+    expect(child(createAgent(), "delivery")).toBeUndefined();
   });
-  it("defaults command payloads to isolated announce jobs", () => {
+  it("defaults command payloads to isolated jobs with no delivery", () => {
     const normalized = createDefaulted({
       kind: "command",
       argv: ["sh", "-lc", "echo ok"],
@@ -275,7 +275,7 @@ describe("normalizeCronJobCreate", () => {
       outputMaxBytes: 4096,
     });
     expect(normalized.sessionTarget).toBe("isolated");
-    expect(child(normalized, "delivery").mode).toBe("announce");
+    expect(child(normalized, "delivery")).toBeUndefined();
     expect(normalized.payload).toEqual({
       kind: "command",
       argv: ["sh", "-lc", "echo ok"],
@@ -334,7 +334,7 @@ describe("normalizeCronJobCreate", () => {
       allowUnsafeExternalContent: true,
     });
     expect(normalized.sessionTarget).toBe("isolated");
-    expect(child(normalized, "delivery").mode).toBe("announce");
+    expect(child(normalized, "delivery")).toBeUndefined();
     expect(normalized.payload).toEqual({
       kind: "agentTurn",
       message: "summarize the build",
@@ -432,17 +432,17 @@ describe("normalizeCronJobCreate", () => {
     const normalized = createAgent({ sessionTarget: "current" }, "agent:main:discord:group:ops");
     expect(normalized.sessionTarget).toBe("current");
     expect(normalized.sessionKey).toBe("agent:main:discord:group:ops");
-    expect(normalized.delivery).toEqual({ mode: "announce" });
+    expect(normalized.delivery).toBeUndefined();
   });
   it("falls back current sessionTarget to isolated without context", () => {
     const normalized = createAgent({ sessionTarget: "current" });
     expect(normalized.sessionTarget).toBe("isolated");
-    expect(normalized.delivery).toEqual({ mode: "announce" });
+    expect(normalized.delivery).toBeUndefined();
   });
   it("preserves custom session ids with a session: prefix", () => {
     const normalized = createAgent({ sessionTarget: "session:MySessionID" });
     expect(normalized.sessionTarget).toBe("session:MySessionID");
-    expect(normalized.delivery).toEqual({ mode: "announce" });
+    expect(normalized.delivery).toBeUndefined();
   });
   it("preserves custom session ids with channel-native separators", () => {
     const created = createAgent({

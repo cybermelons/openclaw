@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { normalizeCronJobCreate } from "./normalize.js";
 
 describe("normalizeCronJobCreate sessionTarget defaults", () => {
-  it("defaults agentTurn jobs with session context to current announce jobs", () => {
+  it("defaults agentTurn jobs with session context to current jobs with no delivery", () => {
     const normalized = normalizeCronJobCreate(
       {
         name: "agent turn current default",
@@ -15,7 +15,7 @@ describe("normalizeCronJobCreate sessionTarget defaults", () => {
     expect(normalized).toMatchObject({
       sessionTarget: "current",
       sessionKey: "agent:main:discord:channel:ops",
-      delivery: { mode: "announce" },
+      delivery: undefined,
     });
   });
 
@@ -27,7 +27,7 @@ describe("normalizeCronJobCreate sessionTarget defaults", () => {
     });
     expect(normalized).toMatchObject({
       sessionTarget: "isolated",
-      delivery: { mode: "announce" },
+      delivery: undefined,
     });
   });
 });

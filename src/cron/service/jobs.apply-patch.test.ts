@@ -184,7 +184,7 @@ describe("applyJobPatch delivery merge", () => {
 
     applyJobPatch(job, patch);
 
-    expect(job.delivery).toEqual({ mode: "announce" });
+    expect(job.delivery).toMatchObject({ mode: "announce" });
   });
 
   it("preserves implicit delivery when clearing an absent override", () => {
@@ -197,15 +197,15 @@ describe("applyJobPatch delivery merge", () => {
     expect(job.delivery).toBeUndefined();
   });
 
-  it("preserves implicit detached delivery when patching best-effort", () => {
+  it("keeps delivery unset when patching best-effort on an implicit job", () => {
     const job = makeJob({ delivery: undefined });
 
     applyJobPatch(job, {
       delivery: { bestEffort: false },
     });
 
-    expect(job.delivery).toEqual({ mode: "announce", bestEffort: false });
-    expect(resolveCronDeliveryPlan(job).mode).toBe("announce");
+    expect(job.delivery).toMatchObject({ mode: "none", bestEffort: false });
+    expect(resolveCronDeliveryPlan(job).mode).toBe("none");
   });
 
   it("preserves implicit main-session delivery when patching best-effort", () => {
