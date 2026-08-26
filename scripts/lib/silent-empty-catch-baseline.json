@@ -1,0 +1,332 @@
+[
+  {
+    "file": "src/agents/cli-runner/claude-skills-plugin.ts",
+    "line": 43,
+    "fn": "isClaudeCliSkillFileAccessible",
+    "returns": "false"
+  },
+  {
+    "file": "src/agents/cli-runner/execute-logging.ts",
+    "line": 99,
+    "fn": "parseCliBackendPreserveEnv",
+    "returns": "new Set()"
+  },
+  {
+    "file": "src/agents/cli-runner/session-history.ts",
+    "line": 597,
+    "fn": "hasCliSessionTranscript",
+    "returns": "false"
+  },
+  {
+    "file": "src/agents/cli-runner/session-history.ts",
+    "line": 350,
+    "fn": "readCliSessionHeaderLine",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/agents/cli-runner/session-history.ts",
+    "line": 323,
+    "fn": "safeRealpath",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/agents/sessions/footer-data-provider.ts",
+    "line": 58,
+    "fn": "findGitPaths",
+    "returns": "null"
+  },
+  {
+    "file": "src/agents/sessions/footer-data-provider.ts",
+    "line": 94,
+    "fn": "resolveBranchWithGitAsync",
+    "returns": "null"
+  },
+  {
+    "file": "src/agents/sessions/footer-data-provider.ts",
+    "line": 256,
+    "fn": "resolveGitBranchAsync",
+    "returns": "null"
+  },
+  {
+    "file": "src/agents/sessions/footer-data-provider.ts",
+    "line": 238,
+    "fn": "resolveGitBranchSync",
+    "returns": "null"
+  },
+  {
+    "file": "src/agents/sessions/keybindings.ts",
+    "line": 344,
+    "fn": "loadRawConfig",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/agents/sessions/package-manager.ts",
+    "line": 884,
+    "fn": "getInstalledNpmVersion",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/agents/sessions/package-manager.ts",
+    "line": 433,
+    "fn": "readResourceManifestFile",
+    "returns": "null"
+  },
+  {
+    "file": "src/agents/sessions/package-manager.ts",
+    "line": 1160,
+    "fn": "readResourceManifest",
+    "returns": "null"
+  },
+  {
+    "file": "src/agents/sessions/prompt-templates.ts",
+    "line": 59,
+    "fn": "loadTemplateFromFile",
+    "returns": "null"
+  },
+  {
+    "file": "src/agents/sessions/resolve-config-value.ts",
+    "line": 75,
+    "fn": "executeWithDefaultShell",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/agents/sessions/tools/grep.ts",
+    "line": 348,
+    "fn": "execute",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/archive-compression.ts",
+    "line": 167,
+    "fn": "removeMaterializedArchiveCacheEntries",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/archive-compression.ts",
+    "line": 141,
+    "fn": "sweepMaterializedArchiveCache",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/cleanup-service.ts",
+    "line": 167,
+    "fn": "sqliteTranscriptHasMessageRecords",
+    "returns": "false"
+  },
+  {
+    "file": "src/config/sessions/disk-budget.ts",
+    "line": 167,
+    "fn": "resolveSessionTranscriptPathForEntry",
+    "returns": "null"
+  },
+  {
+    "file": "src/config/sessions/lifecycle.ts",
+    "line": 233,
+    "fn": "hasTerminalMainSessionTranscriptNewerThanRegistrySync",
+    "returns": "false"
+  },
+  {
+    "file": "src/config/sessions/lifecycle.ts",
+    "line": 131,
+    "fn": "readSessionHeaderStartedAtMs",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/session-accessor.sqlite-archive.ts",
+    "line": 96,
+    "fn": "findMatchingSqliteTranscriptArchive",
+    "returns": "null"
+  },
+  {
+    "file": "src/config/sessions/session-accessor.sqlite-delta.ts",
+    "line": 78,
+    "fn": "parseRawTranscriptCursor",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/session-accessor.sqlite-read.ts",
+    "line": 350,
+    "fn": "parseLatestAssistantMessageEvent",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/session-accessor.sqlite-reset-window.ts",
+    "line": 237,
+    "fn": "findLatestResetMessageWindow",
+    "returns": "[]"
+  },
+  {
+    "file": "src/config/sessions/session-accessor.sqlite-title-probes.ts",
+    "line": 51,
+    "fn": "parseEventType",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/session-accessor.sqlite-visible-cursor.ts",
+    "line": 71,
+    "fn": "parseVisibleMessageCursor",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/session-entry-json.ts",
+    "line": 34,
+    "fn": "parseSqliteSessionEntryRecord",
+    "returns": "null"
+  },
+  {
+    "file": "src/config/sessions/session-reset-boundary-event.ts",
+    "line": 152,
+    "fn": "readLegacyTranscriptEvents",
+    "returns": "[]"
+  },
+  {
+    "file": "src/config/sessions/store-entry-shape.ts",
+    "line": 27,
+    "fn": "normalizeTranscriptSessionId",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/config/sessions/store-maintenance.ts",
+    "line": 115,
+    "fn": "resolveMaxDiskBytes",
+    "returns": "null"
+  },
+  {
+    "file": "src/config/sessions/store-maintenance.ts",
+    "line": 91,
+    "fn": "resolveResetArchiveRetentionMs",
+    "returns": "null"
+  },
+  {
+    "file": "src/config/sessions/store-temp-cleanup.ts",
+    "line": 59,
+    "fn": "{ results }",
+    "returns": "0"
+  },
+  {
+    "file": "src/config/sessions/store-temp-cleanup.ts",
+    "line": 14,
+    "fn": "hasValidPrimaryStore",
+    "returns": "false"
+  },
+  {
+    "file": "src/config/sessions/targets.ts",
+    "line": 471,
+    "fn": "resolveExistingAgentSessionStoreTargetsSync",
+    "returns": "[]"
+  },
+  {
+    "file": "src/gateway/session-compaction-checkpoints.ts",
+    "line": 287,
+    "fn": "parseTranscriptLine",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-compaction-checkpoints.ts",
+    "line": 267,
+    "fn": "readSessionHeaderFromTranscriptAsync",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-compaction-checkpoints.ts",
+    "line": 427,
+    "fn": "readSessionLeafStateFromTranscriptAsync",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-compaction-checkpoints.ts",
+    "line": 319,
+    "fn": "readTranscriptEntriesForForkAsync",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-observer-model.ts",
+    "line": 411,
+    "fn": "normalizeSessionObserverModelOutput",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-reset-service.ts",
+    "line": 1362,
+    "fn": "isResetLifecycleCurrent",
+    "returns": "false"
+  },
+  {
+    "file": "src/gateway/session-transcript-files.fs.ts",
+    "line": 205,
+    "fn": "listResetArchiveCandidatesForTranscriptAsync",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/gateway/session-transcript-files.fs.ts",
+    "line": 136,
+    "fn": "resetArchiveHeaderMatchesSessionId",
+    "returns": "false"
+  },
+  {
+    "file": "src/gateway/session-transcript-files.fs.ts",
+    "line": 166,
+    "fn": "resetArchiveHeaderMatchesSessionId",
+    "returns": "false"
+  },
+  {
+    "file": "src/gateway/session-transcript-json.ts",
+    "line": 45,
+    "fn": "extractJsonStringFieldPrefix",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/gateway/session-utils-model.ts",
+    "line": 483,
+    "fn": "resolveGatewayModelSupportsImages",
+    "returns": "false"
+  },
+  {
+    "file": "src/gateway/session-utils-projection.ts",
+    "line": 191,
+    "fn": "resolveTranscriptUsageFallback",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-utils-store-lookup.ts",
+    "line": 209,
+    "fn": "loadGatewaySessionLookupStoreUncached",
+    "returns": "{}"
+  },
+  {
+    "file": "src/gateway/session-utils.fs.ts",
+    "line": 211,
+    "fn": "extractJsonStringFieldWindow",
+    "returns": "undefined"
+  },
+  {
+    "file": "src/gateway/session-utils.fs.ts",
+    "line": 988,
+    "fn": "extractTranscriptTokenEstimateFromLine",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-utils.fs.ts",
+    "line": 1086,
+    "fn": "extractUsageSnapshotFromTranscriptLine",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-utils.fs.ts",
+    "line": 405,
+    "fn": "parseTranscriptRecord",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-utils.fs.ts",
+    "line": 1218,
+    "fn": "readLatestSessionUsageFromTranscriptFileAsync",
+    "returns": "null"
+  },
+  {
+    "file": "src/gateway/session-utils.fs.ts",
+    "line": 383,
+    "fn": "recoverOversizedMultimodalTranscriptRecord",
+    "returns": "undefined"
+  }
+]
