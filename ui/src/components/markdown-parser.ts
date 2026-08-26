@@ -58,7 +58,7 @@ type MarkdownFileLinkMeta = {
 function renderMarkdownFileBamButton(path: string, line: number | null): string {
   const lineAttribute =
     line === null ? "" : ` data-file-line="${escapeMarkdownHtml(String(line))}"`;
-  return `<button class="markdown-file-bam" data-file-path="${escapeMarkdownHtml(path)}"${lineAttribute} aria-label="open in editor" type="button">⧉</button>`;
+  return `<button class="markdown-file-bam" data-file-path="${escapeMarkdownHtml(path)}"${lineAttribute} aria-label="${escapeMarkdownHtml(t("chat.markdown.openInEditor"))}" type="button">⧉</button>`;
 }
 
 // Shortening a label needs every file link in the message, so the core rule

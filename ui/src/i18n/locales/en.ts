@@ -5051,6 +5051,7 @@ export const en: TranslationMap = {
     },
     markdown: {
       truncated: "… truncated ({total} chars, showing first {shown}).",
+      openInEditor: "open in editor",
     },
     codeBlock: {
       jsonLines: "JSON · {count} lines",
