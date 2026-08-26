@@ -10,9 +10,6 @@ export type BoardVisibleChatDock = Exclude<BoardTab["chatDock"], "hidden">;
 export type BoardSessionView = {
   activeTabId?: string;
   reopenDockByTab?: Record<string, BoardVisibleChatDock>;
-  // UI-only: dashboard side panel fully closed (chat-only full width). Additive-
-  // optional so older builds ignore it and the board renders as before.
-  hidden?: boolean;
 };
 
 export type BoardSessionViews = Record<string, BoardSessionView>;
@@ -39,14 +36,12 @@ export function normalizeBoardSessionViews(value: unknown): BoardSessionViews {
         }
       }
     }
-    const hidden = view.hidden === true;
-    if (!activeTabId && Object.keys(reopenDockByTab).length === 0 && !hidden) {
+    if (!activeTabId && Object.keys(reopenDockByTab).length === 0) {
       continue;
     }
     normalized[sessionKey] = {
       ...(activeTabId ? { activeTabId } : {}),
       ...(Object.keys(reopenDockByTab).length > 0 ? { reopenDockByTab } : {}),
-      ...(hidden ? { hidden: true } : {}),
     };
   }
   return normalized;
