@@ -15,8 +15,8 @@ describe("normalizeCronJobCreate sessionTarget defaults", () => {
     expect(normalized).toMatchObject({
       sessionTarget: "current",
       sessionKey: "agent:main:discord:channel:ops",
-      delivery: undefined,
     });
+    expect(normalized?.delivery).toBeUndefined();
   });
 
   it("downgrades the agentTurn current default to isolated without session context", () => {
@@ -27,7 +27,7 @@ describe("normalizeCronJobCreate sessionTarget defaults", () => {
     });
     expect(normalized).toMatchObject({
       sessionTarget: "isolated",
-      delivery: undefined,
     });
+    expect(normalized?.delivery).toBeUndefined();
   });
 });
