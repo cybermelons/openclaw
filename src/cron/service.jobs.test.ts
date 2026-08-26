@@ -951,7 +951,7 @@ describe("script payload validation", () => {
       timeoutSeconds: 900,
       toolBudget: 200,
     });
-    expect(job.delivery).toEqual({ mode: "announce" });
+    expect(job.delivery).toBeUndefined();
   });
 
   it("allows a main-session script for a named agent", () => {
@@ -1432,7 +1432,7 @@ describe("createJob delivery defaults", () => {
         wakeMode: "now",
         payload: { kind: "agentTurn", message: "hello" },
       });
-      expect(job.delivery).toEqual({ mode: "announce" });
+      expect(job.delivery).toBeUndefined();
     },
   );
 

@@ -152,10 +152,6 @@ export type ResolvedBoardView = {
   snapshot: BoardSnapshot;
   hasBoard: boolean;
   face: BoardFace;
-  // UI-only: dashboard side panel fully closed (chat-only full width). Never
-  // affects `hasBoard` or `face` — those stay contract-shaped so the mode
-  // switch and re-summon path keep working.
-  hidden: boolean;
   activeTabId: string;
   dock: BoardTab["chatDock"];
   reopenDock: BoardVisibleChatDock;

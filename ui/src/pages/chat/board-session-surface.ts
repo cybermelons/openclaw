@@ -55,7 +55,7 @@ export async function ensureBoardViewElement(): Promise<boolean> {
   return true;
 }
 
-type BoardViewMode = "chat" | "split" | "dashboard" | "hidden";
+type BoardViewMode = "chat" | "split" | "dashboard";
 
 function dockLabel(dock: BoardVisibleChatDock): string {
   if (dock === "left") {
@@ -71,7 +71,6 @@ export function renderBoardViewSwitch(props: {
   hasBoard: boolean;
   face: BoardFace;
   dock: BoardTab["chatDock"];
-  hidden: boolean;
   canChangeDock: boolean;
   onSelectMode: (mode: BoardViewMode) => void;
   onDockSideChange: (dock: BoardVisibleChatDock) => void;
@@ -80,13 +79,8 @@ export function renderBoardViewSwitch(props: {
     return nothing;
   }
 
-  const mode: BoardViewMode = props.hidden
-    ? "hidden"
-    : props.face === "chat"
-      ? "chat"
-      : props.dock === "hidden"
-        ? "dashboard"
-        : "split";
+  const mode: BoardViewMode =
+    props.face === "chat" ? "chat" : props.dock === "hidden" ? "dashboard" : "split";
   const segmented = props.canChangeDock
     ? renderSettingsSegmented<BoardViewMode>({
         value: mode,
@@ -95,17 +89,15 @@ export function renderBoardViewSwitch(props: {
           { value: "chat", label: t("chat.board.chatFace") },
           { value: "split", label: t("chat.board.splitFace") },
           { value: "dashboard", label: t("chat.board.dashboardFace") },
-          { value: "hidden", label: t("chat.board.hiddenFace") },
         ],
         onChange: (value) => props.onSelectMode(value),
       })
-    : renderSettingsSegmented<BoardViewMode>({
-        value: mode,
+    : renderSettingsSegmented<BoardFace>({
+        value: props.face,
         ariaLabel: t("chat.board.faceLabel"),
         options: [
           { value: "chat", label: t("chat.board.chatFace") },
           { value: "dashboard", label: t("chat.board.dashboardFace") },
-          { value: "hidden", label: t("chat.board.hiddenFace") },
         ],
         onChange: (value) => props.onSelectMode(value),
       });

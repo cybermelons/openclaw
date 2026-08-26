@@ -40,7 +40,7 @@ describe("resolveInitialCronDelivery", () => {
   });
 
   it.each(["isolated", "current", "session:project-alpha"] as const)(
-    "defaults %s output jobs to announce",
+    "leaves %s output job delivery unset by default",
     (sessionTarget) => {
       const payloads: CronJobCreate["payload"][] = [
         { kind: "agentTurn", message: "hello" },
@@ -48,9 +48,9 @@ describe("resolveInitialCronDelivery", () => {
         { kind: "script", script: "return { notify: 'hello' }" },
       ];
       for (const payload of payloads) {
-        expect(resolveInitialCronDelivery(createInput({ sessionTarget, payload }))).toEqual({
-          mode: "announce",
-        });
+        expect(
+          resolveInitialCronDelivery(createInput({ sessionTarget, payload })),
+        ).toBeUndefined();
       }
     },
   );
@@ -88,7 +88,7 @@ function createDirectCronService(storePath: string) {
 
 describe("CronService initial delivery", () => {
   it.each(["current", "session:project-alpha"] as const)(
-    "persists announce delivery for direct %s jobs",
+    "leaves delivery unset for direct %s jobs",
     async (sessionTarget) => {
       const { storePath } = await makeStorePath();
       const cron = createDirectCronService(storePath);
@@ -98,9 +98,9 @@ describe("CronService initial delivery", () => {
         const added = await cron.add(
           createInput({ sessionTarget, payload: { kind: "agentTurn", message: "hello" } }),
         );
-        expect(added.delivery).toEqual({ mode: "announce" });
+        expect(added.delivery).toBeUndefined();
         await expect(cron.readJob(added.id)).resolves.toMatchObject({
-          delivery: { mode: "announce" },
+          delivery: undefined,
         });
       } finally {
         cron.stop();
@@ -108,7 +108,7 @@ describe("CronService initial delivery", () => {
     },
   );
 
-  it("keeps announce delivery when a declaration converges", async () => {
+  it("keeps delivery unset when a declaration converges", async () => {
     const { storePath } = await makeStorePath();
     const cron = createDirectCronService(storePath);
     await cron.start();
@@ -122,7 +122,7 @@ describe("CronService initial delivery", () => {
 
     try {
       const created = await cron.add(declaration);
-      expect(created.delivery).toEqual({ mode: "announce" });
+      expect(created.delivery).toBeUndefined();
 
       const converged = await cron.add(declaration, { enabledExplicit: true });
       if (!("job" in converged)) {
@@ -131,10 +131,10 @@ describe("CronService initial delivery", () => {
       expect(converged).toMatchObject({
         created: false,
         updated: false,
-        job: { delivery: { mode: "announce" } },
+        job: { delivery: undefined },
       });
       await expect(cron.readJob(converged.job.id)).resolves.toMatchObject({
-        delivery: { mode: "announce" },
+        delivery: undefined,
       });
     } finally {
       cron.stop();

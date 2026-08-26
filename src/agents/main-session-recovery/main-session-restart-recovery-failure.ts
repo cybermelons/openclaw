@@ -142,6 +142,7 @@ export async function tombstoneMainRestartRecoveryWithNotice(params: {
         return "skipped";
       }
       const now = Date.now();
+      const endedAt = typeof entry.updatedAt === "number" ? entry.updatedAt : now;
       const notice = await writeRestartRecoveryTombstoneNotice({
         agentId: params.agentId,
         entry,
@@ -149,14 +150,14 @@ export async function tombstoneMainRestartRecoveryWithNotice(params: {
         sessionKey: params.sessionKey,
         sessionLifecyclePatch: {
           abortedLastRun: false,
-          endedAt: now,
+          endedAt,
           lifecycleRunId: undefined,
           mainRestartRecovery: {
             ...recoveryState,
             revision: recoveryState.revision + 1,
             tombstone: { reason: params.reason },
           },
-          runtimeMs: Math.max(0, now - (entry.startedAt ?? now)),
+          runtimeMs: Math.max(0, endedAt - (entry.startedAt ?? endedAt)),
           status: "failed",
           updatedAt: now,
         },

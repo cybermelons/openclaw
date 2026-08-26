@@ -181,10 +181,11 @@ async function settleRestartRecoveryDispatch(params: {
             : params.terminalStatus === "timeout"
               ? "timeout"
               : "failed";
-        entry.endedAt = now;
+        const endedAt = normalizeFiniteTimestamp(entry.updatedAt) ?? now;
+        entry.endedAt = endedAt;
         const startedAt = normalizeFiniteTimestamp(entry.startedAt);
         if (startedAt !== undefined) {
-          entry.runtimeMs = Math.max(0, now - startedAt);
+          entry.runtimeMs = Math.max(0, endedAt - startedAt);
         }
         entry.restartRecoveryForceSafeTools = undefined;
         Object.assign(
