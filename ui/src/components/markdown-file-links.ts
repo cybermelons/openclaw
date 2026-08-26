@@ -89,6 +89,22 @@ export function markdownFileLinkFromEvent(
   return { path, line: line ? Number.parseInt(line, 10) : null };
 }
 
+export function markdownFileBamFromEvent(
+  event: Event,
+): { path: string; line: number | null } | null {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return null;
+  }
+  const button = target.closest<HTMLButtonElement>("button.markdown-file-bam[data-file-path]");
+  const path = button?.dataset.filePath;
+  if (!path) {
+    return null;
+  }
+  const line = button.dataset.fileLine;
+  return { path, line: line ? Number.parseInt(line, 10) : null };
+}
+
 export function markdownFileLinkFromKeyboardEvent(
   event: KeyboardEvent,
 ): { path: string; line: number | null } | null {

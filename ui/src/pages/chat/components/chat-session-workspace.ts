@@ -613,6 +613,22 @@ export function openSessionWorkspaceFile(
   openFile(state, getWorkspaceState(state), target.path, { line: target.line });
 }
 
+export async function runBamOnFile(
+  state: SessionWorkspaceHost,
+  target: { path: string; line: number | null },
+) {
+  const sessionKey = state.sessionKey;
+  try {
+    await state.client!.request("workspace.runBam", {
+      sessionKey,
+      path: target.path,
+      line: target.line ?? null,
+    });
+  } catch (error) {
+    console.error(formatUiError(error));
+  }
+}
+
 function toggleSessionWorkspace(state: SessionWorkspaceHost) {
   const workspace = getWorkspaceState(state);
   workspace.collapsed = !workspace.collapsed;

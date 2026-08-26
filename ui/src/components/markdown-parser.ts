@@ -51,6 +51,16 @@ type MarkdownFileLinkMeta = {
   title: string | null;
 };
 
+// Renders the hover "bam" button as a sibling immediately after a file-link
+// anchor (never nested inside it, and never inside <code>) so click delegation
+// can distinguish "open in sidebar" (the anchor) from "open in editor" (this
+// button) while sharing the anchor's resolved path/line.
+function renderMarkdownFileBamButton(path: string, line: number | null): string {
+  const lineAttribute =
+    line === null ? "" : ` data-file-line="${escapeMarkdownHtml(String(line))}"`;
+  return `<button class="markdown-file-bam" data-file-path="${escapeMarkdownHtml(path)}"${lineAttribute} aria-label="${escapeMarkdownHtml(t("chat.markdown.openInEditor"))}" type="button">⧉</button>`;
+}
+
 // Shortening a label needs every file link in the message, so the core rule
 // collects targets first and applies labels in a second pass.
 type MarkdownFileLinkDecoration = {
@@ -456,7 +466,9 @@ export function createMarkdownParser(): MarkdownIt {
           label.content = matched;
           const close = new state.Token("link_close", "a", -1);
           close.markup = "file-link";
-          replacements.push(open, label, close);
+          const bam = new state.Token("file_bam", "", 0);
+          bam.meta = { fileBam: { path: target.path, line: target.line } };
+          replacements.push(open, label, close, bam);
           decorations.push({
             path: target.path,
             reference: matched,
@@ -583,6 +595,10 @@ export function createMarkdownParser(): MarkdownIt {
       ? token.content
       : renderRawMarkdownHtml(tokens, index, env, false);
   };
+  markdownParser.renderer.rules.file_bam = (tokens, index) => {
+    const meta = tokens[index]?.meta?.fileBam as { path: string; line: number | null } | undefined;
+    return meta ? renderMarkdownFileBamButton(meta.path, meta.line) : "";
+  };
   markdownParser.renderer.rules.code_inline = (tokens, index, options, env, self) => {
     const rendered = defaultCodeInlineRenderer(tokens, index, options, env, self);
     const target = tokens[index]?.meta?.fileLink as MarkdownFileLinkMeta | undefined;
@@ -591,7 +607,7 @@ export function createMarkdownParser(): MarkdownIt {
         target.line === null ? "" : ` data-file-line="${escapeMarkdownHtml(String(target.line))}"`;
       const titleAttribute =
         target.title === null ? "" : ` title="${escapeMarkdownHtml(target.title)}"`;
-      return `<a class="markdown-file-link" role="button" tabindex="0" data-file-path="${escapeMarkdownHtml(target.path)}" data-file-kind="${fileKindForPath(target.path)}"${lineAttribute}${titleAttribute}>${rendered}</a>`;
+      return `<a class="markdown-file-link" role="button" tabindex="0" data-file-path="${escapeMarkdownHtml(target.path)}" data-file-kind="${fileKindForPath(target.path)}"${lineAttribute}${titleAttribute}>${rendered}</a>${renderMarkdownFileBamButton(target.path, target.line)}`;
     }
     const sessionKey: unknown = tokens[index]?.meta?.sessionLink?.sessionKey;
     return typeof sessionKey === "string"

@@ -15,11 +15,13 @@ import { SessionCollaborationProtocolSchemas } from "./protocol-schema-fragment-
 import { SessionCoreProtocolSchemas } from "./protocol-schema-fragment-sessions-core.js";
 import { SessionLifecycleProtocolSchemas } from "./protocol-schema-fragment-sessions-lifecycle.js";
 import { TransportProtocolSchemas } from "./protocol-schema-fragment-transport.js";
+import { WorkspaceProtocolSchemas } from "./protocol-schema-fragment-workspace.js";
 
 /** Public schema registry keyed by stable protocol schema name. */
 export const ProtocolSchemas = composeProtocolSchemaFragments([
   BoardProtocolSchemas,
   ProgressCardProtocolSchemas,
+  WorkspaceProtocolSchemas,
   TransportProtocolSchemas,
   AgentControlProtocolSchemas,
   NodeProtocolSchemas,

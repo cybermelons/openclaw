@@ -141,6 +141,8 @@ const CORE_GATEWAY_HANDLER_MODULES = {
   send: () => import("./server-methods/send.js").then((module) => module.sendHandlers),
   "sessions-files": () =>
     import("./server-methods/sessions-files.js").then((module) => module.sessionsFilesHandlers),
+  workspace: () =>
+    import("./server-methods/workspace.js").then((module) => module.workspaceHandlers),
   "sessions-diff": () =>
     import("./server-methods/sessions-diff.js").then((module) => module.sessionsDiffHandlers),
   "sessions-abort": () =>
