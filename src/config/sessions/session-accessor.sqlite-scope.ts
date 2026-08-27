@@ -1,6 +1,7 @@
 // Sanctioned low-level scope/Kysely entry point for doctor, migrations, and infrastructure.
 // Runtime feature code imports the session accessor barrel instead of this module.
 import path from "node:path";
+import type { Insertable, Updateable } from "kysely";
 import { getNodeSqliteKysely } from "../../infra/kysely-sync.js";
 import { getChildLogger } from "../../logging/logger.js";
 import {
@@ -86,6 +87,19 @@ const SQLITE_SESSION_WRITER_QUEUES = new Map<string, StoreWriterQueue>();
 
 export function getSessionKysely(database: import("node:sqlite").DatabaseSync) {
   return getNodeSqliteKysely<SessionSqliteDatabase>(database);
+}
+
+type Conv = OpenClawAgentKyselyDatabase["session_conversations"];
+// `db` is a passed handle, never captured, so cross-store repair targets its own store.
+export function upsertSessionConversationLink(
+  db: ReturnType<typeof getSessionKysely>,
+  values: Insertable<Conv> | Insertable<Conv>[],
+  updateSet: Updateable<Conv>,
+) {
+  return db
+    .insertInto("session_conversations")
+    .values(values)
+    .onConflict((c) => c.columns(["session_id", "conversation_id", "role"]).doUpdateSet(updateSet));
 }
 
 export async function runExclusiveSqliteSessionWrite<T>(

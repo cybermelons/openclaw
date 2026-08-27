@@ -22,6 +22,7 @@ import {
   resolveSqliteStoreScope,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
+  upsertSessionConversationLink,
 } from "./session-accessor.sqlite-scope.js";
 import { bindSessionWindowEntryProjection } from "./session-accessor.sqlite-session-row.js";
 import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
@@ -457,15 +458,10 @@ function copySqliteSessionOwnedStateForRepair(params: {
   for (const link of sessionLinks) {
     executeSqliteQuerySync(
       params.destination.db,
-      destinationDb
-        .insertInto("session_conversations")
-        .values(link)
-        .onConflict((conflict) =>
-          conflict.columns(["session_id", "conversation_id", "role"]).doUpdateSet({
-            first_seen_at: link.first_seen_at,
-            last_seen_at: link.last_seen_at,
-          }),
-        ),
+      upsertSessionConversationLink(destinationDb, link, {
+        first_seen_at: link.first_seen_at,
+        last_seen_at: link.last_seen_at,
+      }),
     );
   }
   for (const sessionId of sessionIds) {

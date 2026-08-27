@@ -4,7 +4,10 @@ import {
   conversationIdentityFromSessionEntry,
   type ConversationIdentity,
 } from "./conversation-identity.js";
-import { getSessionKysely } from "./session-accessor.sqlite-scope.js";
+import {
+  getSessionKysely,
+  upsertSessionConversationLink,
+} from "./session-accessor.sqlite-scope.js";
 import type { SessionEntry } from "./types.js";
 
 type SessionConversationRole = "participant" | "primary" | "related";
@@ -100,22 +103,17 @@ export function linkSessionConversation(params: {
     if (stalePrimaryRows.length > 0) {
       executeSqliteQuerySync(
         database.db,
-        db
-          .insertInto("session_conversations")
-          .values(
-            stalePrimaryRows.map((row) => ({
-              session_id: sessionId,
-              conversation_id: row.conversation_id,
-              role: "related",
-              first_seen_at: row.first_seen_at,
-              last_seen_at: updatedAt,
-            })),
-          )
-          .onConflict((conflict) =>
-            conflict.columns(["session_id", "conversation_id", "role"]).doUpdateSet({
-              last_seen_at: updatedAt,
-            }),
-          ),
+        upsertSessionConversationLink(
+          db,
+          stalePrimaryRows.map((row) => ({
+            session_id: sessionId,
+            conversation_id: row.conversation_id,
+            role: "related",
+            first_seen_at: row.first_seen_at,
+            last_seen_at: updatedAt,
+          })),
+          { last_seen_at: updatedAt },
+        ),
       );
       executeSqliteQuerySync(
         database.db,
@@ -140,19 +138,16 @@ export function linkSessionConversation(params: {
   );
   executeSqliteQuerySync(
     database.db,
-    db
-      .insertInto("session_conversations")
-      .values({
+    upsertSessionConversationLink(
+      db,
+      {
         session_id: sessionId,
         conversation_id: conversation.identity.conversationRef,
         role: conversation.role,
         first_seen_at: updatedAt,
         last_seen_at: updatedAt,
-      })
-      .onConflict((conflict) =>
-        conflict.columns(["session_id", "conversation_id", "role"]).doUpdateSet({
-          last_seen_at: updatedAt,
-        }),
-      ),
+      },
+      { last_seen_at: updatedAt },
+    ),
   );
 }
