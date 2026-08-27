@@ -496,18 +496,6 @@ function resolveSafeCliSessionFile(params: {
  * resolver then derives a .jsonl path that never exists. Gating on the sentinel
  * silently skipped the store for exactly the sessions that live in it.
  */
-// Retry budget for a transient projection lag on resume: the throw site already
-// kicks the reconcile job, so this just waits for it to catch up instead of
-// reseeding a blank prompt. Hard caps on both attempts and wall clock so a
-// resume turn can never hang on this.
-const PROJECTION_RETRY_MAX_ATTEMPTS = 3;
-const PROJECTION_RETRY_BACKOFF_MS = 200;
-const PROJECTION_RETRY_BUDGET_MS = 2000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function readSqliteCliSessionEntriesOnce(params: {
   sessionId: string;
   sessionFile: string;
@@ -528,36 +516,32 @@ function readSqliteCliSessionEntriesOnce(params: {
   return entries.length > 0 ? entries : undefined;
 }
 
-async function readSqliteCliSessionEntries(params: {
+// Thin wrapper (PHASE-4.md §4 CS-5): CS-3 (drain+marker one txn, dispatch
+// gated on COMMIT) and CS-4 (resume readers refuse drain_pending) already
+// guarantee a resume read observes a consistent transcript, so this no
+// longer retries a transient projection lag. Any store error — including
+// SessionTranscriptProjectionUnavailableError — falls straight through to
+// the file reader; sleep-based retry is forbidden here.
+function readSqliteCliSessionEntries(params: {
   sessionId: string;
   sessionFile: string;
   sessionKey?: string;
   agentId?: string;
-}): Promise<unknown[] | undefined> {
-  const startedAt = Date.now();
-  for (let attempt = 1; attempt <= PROJECTION_RETRY_MAX_ATTEMPTS; attempt++) {
-    try {
-      return readSqliteCliSessionEntriesOnce(params);
-    } catch (error) {
-      if (!isSessionTranscriptProjectionUnavailableError(error)) {
-        // Never break history loading on a store read; fall through to the file reader.
-        cliBackendLog.warn(`sqlite cli session history read failed: ${formatErrorMessage(error)}`);
-        return undefined;
-      }
-      // Transient projection lag: the throw site already kicked the reconcile job,
-      // so just wait for it to catch up and re-read, instead of reseeding blank
-      // context. Bail to the same fallback as any other error once the attempt
-      // count or wall-clock budget is exhausted.
-      const elapsedMs = Date.now() - startedAt;
-      const remainingBudgetMs = PROJECTION_RETRY_BUDGET_MS - elapsedMs;
-      if (attempt >= PROJECTION_RETRY_MAX_ATTEMPTS || remainingBudgetMs <= 0) {
-        cliBackendLog.warn(`sqlite cli session history read failed: ${formatErrorMessage(error)}`);
-        return undefined;
-      }
-      await sleep(Math.min(PROJECTION_RETRY_BACKOFF_MS, remainingBudgetMs));
+}): unknown[] | undefined {
+  try {
+    return readSqliteCliSessionEntriesOnce(params);
+  } catch (error) {
+    if (isSessionTranscriptProjectionUnavailableError(error)) {
+      // Projection lag: CS-3/CS-4 already guarantee a resume read observes a
+      // consistent transcript, so there is nothing to retry here. Fall
+      // through to the file reader.
+      cliBackendLog.warn(`sqlite cli session history read failed: ${formatErrorMessage(error)}`);
+      return undefined;
     }
+    // Never break history loading on a store read; fall through to the file reader.
+    cliBackendLog.warn(`sqlite cli session history read failed: ${formatErrorMessage(error)}`);
+    return undefined;
   }
-  return undefined;
 }
 
 /**
@@ -615,7 +599,7 @@ async function loadCliSessionEntries(params: {
     // through the silent catch. Read the canonical store first: without this, resuming
     // a session whose transcript lives only in SQLite reseeds nothing, and the chat
     // starts cold even though its full history is present.
-    const sqliteEntries = await readSqliteCliSessionEntries(params);
+    const sqliteEntries = readSqliteCliSessionEntries(params);
     if (sqliteEntries) {
       return projectLatestCliHistoryBoundary(
         selectSessionTranscriptLeafControlledPath(sqliteEntries) ?? sqliteEntries,
@@ -718,7 +702,7 @@ export async function hasCliSessionTranscript(params: {
     const { sessionFile, sessionsDir } = resolveSafeCliSessionFile(params);
     // Same sentinel branch as the loader: a SQLite-backed session has no file, so the
     // filesystem probe below would report "no transcript" for a session that has one.
-    const sqliteEntries = await readSqliteCliSessionEntries(params);
+    const sqliteEntries = readSqliteCliSessionEntries(params);
     if (sqliteEntries) {
       return sqliteEntries.length > 0;
     }
