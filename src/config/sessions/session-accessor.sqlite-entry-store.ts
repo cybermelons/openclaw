@@ -46,7 +46,7 @@ import {
 } from "./session-accessor.sqlite-session-row.js";
 import {
   hasValidSessionEntryIdentity,
-  parseSessionEntryJson as parseSessionEntryRow,
+  parseSessionEntryJson,
 } from "./session-accessor.sqlite-status.js";
 import { readTranscriptMutationStateInTransaction } from "./session-accessor.sqlite-transcript-state.js";
 import {
@@ -271,7 +271,7 @@ export function readSessionEntryStore(
   for (const row of rows) {
     // Doctor lifecycle projection supplies its separately hydrated expected entry for rejected
     // raw rows; ordinary exact reads still fail loud before a write can replace one.
-    const entry = parseSessionEntryRow(row);
+    const entry = parseSessionEntryJson(row);
     if (entry) {
       store[row.session_key] = entry;
     }
@@ -285,7 +285,7 @@ export function readSessionEntryCount(database: OpenClawAgentDatabase): number {
     database.db,
     db.selectFrom("session_nodes").select("entry_json"),
   ).rows;
-  return rows.reduce((count, row) => count + (parseSessionEntryRow(row) ? 1 : 0), 0);
+  return rows.reduce((count, row) => count + (parseSessionEntryJson(row) ? 1 : 0), 0);
 }
 
 export function readSessionEntryKeys(database: OpenClawAgentDatabaseReader): string[] {
@@ -296,7 +296,7 @@ export function readSessionEntryKeys(database: OpenClawAgentDatabaseReader): str
       .selectFrom("session_nodes")
       .select(["entry_json", "session_key"])
       .orderBy("session_key", "asc"),
-  ).rows.flatMap((row) => (parseSessionEntryRow(row) ? [row.session_key] : []));
+  ).rows.flatMap((row) => (parseSessionEntryJson(row) ? [row.session_key] : []));
 }
 
 export function resolveLifecyclePrimaryEntry(
@@ -383,7 +383,7 @@ export function deleteSessionEntryRows(
       if (node.current_session_id === window.session_id) {
         return true;
       }
-      const entry = parseSessionEntryRow(node);
+      const entry = parseSessionEntryJson(node);
       return entry ? collectSessionStateIdsForEntry(entry).includes(window.session_id) : false;
     });
     if (survivingNode) {

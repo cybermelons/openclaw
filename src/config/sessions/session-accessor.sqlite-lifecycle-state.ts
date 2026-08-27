@@ -38,7 +38,7 @@ import { coerceSqliteNumber } from "./session-accessor.sqlite-normalize.js";
 import { loadTranscriptEventsFromDatabase } from "./session-accessor.sqlite-read.js";
 import { collectSessionStateIdsForEntry } from "./session-accessor.sqlite-references.js";
 import { cloneSessionEntry, getSessionKysely } from "./session-accessor.sqlite-scope.js";
-import { parseSessionEntryJson as parseSessionEntryRow } from "./session-accessor.sqlite-status.js";
+import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
 import { buildSessionResetBoundaryPlan } from "./session-reset-boundary-event.js";
 import { deleteSessionTranscriptIndexInTransaction } from "./session-transcript-index.js";
 import type { SessionEntry } from "./types.js";
@@ -157,7 +157,7 @@ export function readReferencedSessionIds(
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryRow(row);
+    const entry = parseSessionEntryJson(row);
     if (!entry) {
       continue;
     }
@@ -189,7 +189,7 @@ export function readReferencedSessionIdsAfterTargetMutation(
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryRow(row);
+    const entry = parseSessionEntryJson(row);
     if (!entry) {
       continue;
     }
@@ -491,7 +491,7 @@ export function collectProjectedReferencedSessionIds(params: {
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryRow(row);
+    const entry = parseSessionEntryJson(row);
     if (!entry) {
       continue;
     }
@@ -627,7 +627,7 @@ export function planSessionLifecycleArtifactCleanup(
     ) {
       continue;
     }
-    const entry = parseSessionEntryRow(row);
+    const entry = parseSessionEntryJson(row);
     const sessionIds = uniqueStrings([
       row.current_session_id,
       ...(entry ? collectSessionStateIdsForEntry(entry) : []),
