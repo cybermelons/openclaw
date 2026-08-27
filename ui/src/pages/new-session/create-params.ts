@@ -41,6 +41,7 @@ export function buildDraftSessionCreateParams(draft: {
   execNode?: string;
   catalogId?: string;
   category?: string;
+  holdInitialTurn?: boolean;
 }): Record<string, unknown> {
   const cwd = normalizeOptionalString(draft.cwd);
   const workspace = normalizeOptionalString(draft.workspace);
@@ -57,6 +58,7 @@ export function buildDraftSessionCreateParams(draft: {
     message: draft.message,
     ...(draft.visibility === "incognito" ? { incognito: true } : {}),
     ...(draft.visibility === "draft" ? { visibility: "draft" } : {}),
+    ...(draft.holdInitialTurn ? { holdInitialTurn: true } : {}),
     ...(draft.attachments?.length ? { attachments: draft.attachments } : {}),
     ...(catalogId ? { catalogId } : {}),
     ...(category ? { category } : {}),

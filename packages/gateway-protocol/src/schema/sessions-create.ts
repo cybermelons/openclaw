@@ -43,6 +43,12 @@ export const SessionsCreateParamsSchema = closedObject({
   ),
   task: Type.Optional(Type.String()),
   message: Type.Optional(Type.String()),
+  holdInitialTurn: Type.Optional(
+    Type.Boolean({
+      description:
+        "Create the session without dispatching the initial chat.send turn; the client re-seeds the message as an unsent composer draft.",
+    }),
+  ),
   attachments: Type.Optional(ChatAttachmentsSchema),
   projectId: Type.Optional(
     Type.String({
