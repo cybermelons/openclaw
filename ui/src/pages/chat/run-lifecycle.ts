@@ -1,3 +1,4 @@
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { GatewaySessionRow, SessionRunStatus, SessionsListResult } from "../../api/types.ts";
@@ -136,6 +137,25 @@ function setChatError(state: ChatAbortRunState, error: string | null) {
   state.chatError = error;
 }
 
+// Transport success does not mean an abort did anything: chat.abort can
+// report {ok:true, aborted:false, runIds:[]} and sessions.abort can report
+// {ok:true, abortedRunId:null} when there was nothing to stop.
+function abortResultDidWork(result: unknown): boolean {
+  if (!isRecord(result)) {
+    return false;
+  }
+  if (result.aborted === true) {
+    return true;
+  }
+  if (Array.isArray(result.runIds) && result.runIds.length > 0) {
+    return true;
+  }
+  if (typeof result.abortedRunId === "string" && result.abortedRunId.length > 0) {
+    return true;
+  }
+  return false;
+}
+
 export function isChatBusy(host: { chatSending?: boolean; chatRunId?: string | null }) {
   return Boolean(host.chatSending || host.chatRunId);
 }
@@ -145,16 +165,19 @@ export function hasAbortableSessionRun(host: {
   sessionKey: string;
   sessionsResult?: SessionsListResult | null;
 }): boolean {
-  if (host.chatRunId) {
-    return true;
-  }
-  return Boolean(
-    host.sessionsResult?.sessions.some(
-      (session) =>
-        areUiSessionKeysEquivalent(session.key, host.sessionKey) &&
-        (isSessionRunActive(session) || session.hasActiveSubagentRun === true),
-    ),
+  const matchingRow = host.sessionsResult?.sessions.find((session) =>
+    areUiSessionKeysEquivalent(session.key, host.sessionKey),
   );
+  if (matchingRow) {
+    if (isSessionRunActive(matchingRow) || matchingRow.hasActiveSubagentRun === true) {
+      return true;
+    }
+    // A confirmed server row for this session shows no active run: a stale,
+    // uncleared local chatRunId cannot arm a Stop that would only no-op.
+    return false;
+  }
+  // No server row to disprove it; fall back to local optimism.
+  return Boolean(host.chatRunId);
 }
 
 export function isChatStopCommand(text: string) {
@@ -178,24 +201,36 @@ type ChatAbortOptions = { preserveDraft?: boolean };
 async function requestChatAbort(
   client: GatewayBrowserClient,
   intent: ChatAbortIntent,
-): Promise<{ ok: true } | { ok: false; error: unknown }> {
+  opts?: { retrySessionWideOnNoop?: boolean },
+): Promise<{ ok: true; result: unknown } | { ok: false; error: unknown }> {
   try {
     if (intent.runId !== null) {
-      await client.request("chat.abort", {
+      const res = await client.request("chat.abort", {
         sessionKey: intent.sessionKey,
         ...(intent.agentId ? { agentId: intent.agentId } : {}),
         runId: intent.runId,
       });
-    } else {
-      // A channel reply can be active without a browser-local chat run ID.
-      // Session abort resolves the selected persisted session's exact run.
-      await client.request("sessions.abort", {
-        key: intent.sessionKey,
+      if (abortResultDidWork(res) || !opts?.retrySessionWideOnNoop) {
+        return { ok: true, result: res };
+      }
+      // A run id that no longer names the live run aborts nothing; retry
+      // session-wide before reporting failure so Stop cannot strand an
+      // active run behind a stale local run id. Only safe for a live intent
+      // built from current state, not for a replayed exact-run intent.
+      const retryRes = await client.request("chat.abort", {
+        sessionKey: intent.sessionKey,
         ...(intent.agentId ? { agentId: intent.agentId } : {}),
-        ...(intent.clearQueued ? { clearQueued: true } : {}),
       });
+      return { ok: true, result: retryRes };
     }
-    return { ok: true };
+    // A channel reply can be active without a browser-local chat run ID.
+    // Session abort resolves the selected persisted session's exact run.
+    const res = await client.request("sessions.abort", {
+      key: intent.sessionKey,
+      ...(intent.agentId ? { agentId: intent.agentId } : {}),
+      ...(intent.clearQueued ? { clearQueued: true } : {}),
+    });
+    return { ok: true, result: res };
   } catch (err) {
     return { ok: false, error: err };
   }
@@ -225,11 +260,18 @@ async function abortChatRun(state: ChatAbortRunState): Promise<boolean> {
   if (!client || !state.connected) {
     return false;
   }
-  const result = await requestChatAbort(client, currentChatAbortIntent(state, client));
+  const result = await requestChatAbort(client, currentChatAbortIntent(state, client), {
+    retrySessionWideOnNoop: true,
+  });
   if (!result.ok) {
     setChatError(state, formatConnectError(result.error));
+    return false;
   }
-  return result.ok;
+  const didWork = abortResultDidWork(result.result);
+  if (!didWork) {
+    setChatError(state, t("chat.questions.stopFailed"));
+  }
+  return didWork;
 }
 
 export async function replayPendingChatAbort(host: ChatAbortHost): Promise<boolean> {
@@ -255,10 +297,18 @@ export async function replayPendingChatAbort(host: ChatAbortHost): Promise<boole
     return false;
   }
   const result = await requestChatAbort(client, intent);
-  if (result.ok) {
+  if (!result.ok) {
+    setChatError(host, formatConnectError(result.error));
+    return false;
+  }
+  if (abortResultDidWork(result.result)) {
     return true;
   }
-  setChatError(host, formatConnectError(result.error));
+  // A no-op here means the run already ended before this replay landed.
+  // Do not retry session-wide: a reconnect replay targets an exact run, and
+  // a session-wide abort could kill an unrelated newer run (see comments at
+  // PendingChatAbort and requestChatAbort's caller above).
+  setChatError(host, t("chat.questions.stopFailed"));
   return false;
 }
 
