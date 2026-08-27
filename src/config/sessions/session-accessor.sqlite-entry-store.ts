@@ -18,7 +18,6 @@ import {
   trackSessionEntryCacheWrite,
 } from "./session-accessor.sqlite-entry-cache.js";
 import {
-  sqliteLifecycleTargetSnapshotsEqual,
   sqliteSessionEntriesEqual,
   sqliteSessionSnapshotRowsEqual,
 } from "./session-accessor.sqlite-entry-equality.js";
@@ -57,6 +56,8 @@ import {
   assertCanonicalSessionKeyWriteMatchesDatabase,
   canonicalSessionKeyMigrationRequiredError,
 } from "./session-canonical-key.js";
+import { sessionCasValueCompareEnabled } from "./session-cas-mode.js";
+import { SessionConflictError } from "./session-conflict-error.js";
 import { parseSqliteSessionEntryRecord } from "./session-entry-json.js";
 import { projectCanonicalSessionEntryShape } from "./store-entry-shape.js";
 import {
@@ -78,7 +79,7 @@ type SqliteSessionEntrySelectionSnapshot = {
   selectedRows: Array<{ entry: SessionEntry; sessionKey: string }>;
 };
 type SqliteLifecycleTargetSnapshot = {
-  primary: { entry: SessionEntry; key: string } | undefined;
+  primary: { entry: SessionEntry; key: string; revision: number } | undefined;
   rows: Array<{ entry: SessionEntry; sessionKey: string }>;
 };
 
@@ -118,13 +119,6 @@ export function parseReadableSqliteSessionEntryRow(
   throw canonicalSessionKeyMigrationRequiredError(
     `invalid persisted session row requires repair for ${row.session_key}`,
   );
-}
-
-class SqliteSessionMutationConflictError extends Error {
-  constructor(operationLabel: string) {
-    super(`SQLite session state changed while preparing ${operationLabel}`);
-    this.name = "SqliteSessionMutationConflictError";
-  }
 }
 
 export function readSessionIdentitySnapshot(
@@ -203,19 +197,54 @@ export function readSessionEntrySelectionSnapshot(
   };
 }
 
+/**
+ * Conflict predicate for `assertSessionEntrySelectionUnchanged`. Default
+ * (flag off): integer revision compare — a key change, an existence flip
+ * (one side selected, the other not), or a differing `row.revision` is a
+ * conflict. Flag on (`OPENCLAW_SESSION_CAS_VALUE_COMPARE=1`): legacy
+ * value-compare via `sqliteSessionEntriesEqual`, kept byte-identical to
+ * pre-Phase-1 behavior (can miss an ABA ping-pong that leaves the same
+ * value at a different revision — PHASE-1.md §7, shape-only parity).
+ */
+function sessionEntrySelectionPrimaryConflicted(
+  expected: SqliteSessionEntrySelectionSnapshot,
+  current: SqliteSessionEntrySelectionSnapshot,
+): boolean {
+  if (sessionCasValueCompareEnabled()) {
+    return !(
+      expected.selected?.row.session_key === current.selected?.row.session_key &&
+      sqliteSessionEntriesEqual(expected.selected?.entry, current.selected?.entry)
+    );
+  }
+  const expectedKey = expected.selected?.row.session_key;
+  const currentKey = current.selected?.row.session_key;
+  const expectedRevision = expected.selected?.row.revision;
+  const currentRevision = current.selected?.row.revision;
+  if (expectedKey === undefined && currentKey === undefined) {
+    return false;
+  }
+  return expectedKey !== currentKey || expectedRevision !== currentRevision;
+}
+
 export function assertSessionEntrySelectionUnchanged(
   expected: SqliteSessionEntrySelectionSnapshot,
   current: SqliteSessionEntrySelectionSnapshot,
   operationLabel: string,
 ): void {
-  const selectedMatches =
-    expected.selected?.row.session_key === current.selected?.row.session_key &&
-    sqliteSessionEntriesEqual(expected.selected?.entry, current.selected?.entry);
+  // The alias/selected-rows key-set guard is orthogonal to the primary
+  // revision/value compare and stays as a structural check in both modes
+  // (PHASE-1.md CS-3a scope note: not deleted, not converted).
   if (
-    !selectedMatches ||
+    sessionEntrySelectionPrimaryConflicted(expected, current) ||
     !sqliteSessionSnapshotRowsEqual(expected.selectedRows, current.selectedRows)
   ) {
-    throw new SqliteSessionMutationConflictError(operationLabel);
+    const key =
+      expected.selected?.row.session_key ?? current.selected?.row.session_key ?? operationLabel;
+    throw new SessionConflictError({
+      actualRevision: current.selected?.row.revision ?? -1,
+      expectedRevision: expected.selected?.row.revision ?? -1,
+      key,
+    });
   }
 }
 
@@ -305,11 +334,11 @@ export function resolveLifecyclePrimaryEntry(
   database: OpenClawAgentDatabase,
   target: { canonicalKey: string; storeKeys: string[] },
   options: { allowCanonicalMove?: boolean } = {},
-): { key: string; entry: SessionEntry } | undefined {
+): { key: string; entry: SessionEntry; revision: number } | undefined {
   const rows = target.storeKeys.flatMap((key) => {
     const sessionKey = key.trim();
     const row = readExactSessionEntryRow(database, sessionKey);
-    return row ? [{ key: sessionKey, entry: row.entry }] : [];
+    return row ? [{ key: sessionKey, entry: row.entry, revision: row.row.revision }] : [];
   });
   if (rows.length > 1) {
     throw canonicalSessionKeyMigrationRequiredError(
@@ -341,13 +370,49 @@ export function readLifecycleTargetSnapshot(
   };
 }
 
+/**
+ * Conflict predicate for `assertLifecycleTargetSnapshotUnchanged`. Default
+ * (flag off): integer revision compare on the primary row plus the same
+ * alias-row structural guard `sqliteLifecycleTargetSnapshotsEqual` already
+ * performs on `.rows`. Flag on: legacy value-compare via
+ * `sqliteLifecycleTargetSnapshotsEqual`, byte-identical to pre-Phase-1.
+ */
+function lifecycleTargetPrimaryConflicted(
+  expected: SqliteLifecycleTargetSnapshot,
+  current: SqliteLifecycleTargetSnapshot,
+): boolean {
+  if (sessionCasValueCompareEnabled()) {
+    return !(
+      expected.primary?.key === current.primary?.key &&
+      sqliteSessionEntriesEqual(expected.primary?.entry, current.primary?.entry)
+    );
+  }
+  if (expected.primary === undefined && current.primary === undefined) {
+    return false;
+  }
+  return (
+    expected.primary?.key !== current.primary?.key ||
+    expected.primary?.revision !== current.primary?.revision
+  );
+}
+
 export function assertLifecycleTargetSnapshotUnchanged(
   expected: SqliteLifecycleTargetSnapshot,
   current: SqliteLifecycleTargetSnapshot,
   operationLabel: string,
 ): void {
-  if (!sqliteLifecycleTargetSnapshotsEqual(expected, current)) {
-    throw new SqliteSessionMutationConflictError(operationLabel);
+  // The alias-row structural guard stays exactly as sqliteLifecycleTargetSnapshotsEqual
+  // performs it today (key-set + value compare on `.rows`), independent of mode.
+  if (
+    lifecycleTargetPrimaryConflicted(expected, current) ||
+    !sqliteSessionSnapshotRowsEqual(expected.rows, current.rows)
+  ) {
+    const key = expected.primary?.key ?? current.primary?.key ?? operationLabel;
+    throw new SessionConflictError({
+      actualRevision: current.primary?.revision ?? -1,
+      expectedRevision: expected.primary?.revision ?? -1,
+      key,
+    });
   }
 }
 
