@@ -7,6 +7,8 @@ docker-compose.sandbox.yml
 dist
 dist-runtime/
 dist-sea/
+builds/
+deploy.log
 pnpm-lock.yaml
 bun.lock
 bun.lockb
