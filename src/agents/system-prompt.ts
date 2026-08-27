@@ -865,6 +865,8 @@ export function buildAgentSystemPrompt(params: {
     chatType?: string;
     capabilities?: string[];
     repoRoot?: string;
+    /** Authoritative working directory the model should treat as "here"; survives compaction. */
+    cwd?: string;
     activeProcessSessions?: ActiveProcessSessionReference[];
     activeNode?: string;
   };
@@ -1591,6 +1593,7 @@ function buildRuntimeLine(
     defaultModel?: string;
     shell?: string;
     repoRoot?: string;
+    cwd?: string;
     activeProcessSessions?: ActiveProcessSessionReference[];
     activeNode?: string;
   },
@@ -1611,6 +1614,10 @@ function buildRuntimeLine(
     stableSessionId ? `sessionId=${sanitizeForPromptLiteral(stableSessionId)}` : "",
     runtimeInfo?.host ? `host=${runtimeInfo.host}` : "",
     runtimeInfo?.repoRoot ? `repo=${runtimeInfo.repoRoot}` : "",
+    // Authoritative "here": post-compact turns lose conversational cwd binding, and repo=
+    // resolves workspace-before-cwd so it can be absent/mismatched in a worktree. Skip when
+    // identical to repo= to keep the cached prompt prefix lean.
+    runtimeInfo?.cwd && runtimeInfo.cwd !== runtimeInfo.repoRoot ? `cwd=${runtimeInfo.cwd}` : "",
     runtimeInfo?.os
       ? `os=${runtimeInfo.os}${runtimeInfo?.arch ? ` (${runtimeInfo.arch})` : ""}`
       : runtimeInfo?.arch

@@ -234,7 +234,7 @@ export async function resolveCommandsSystemPromptBundle(
     config: params.cfg,
     agentId: sessionAgentId,
     workspaceDir,
-    cwd: process.cwd(),
+    cwd: workspaceDir,
     runtime: {
       sessionKey: params.sessionKey,
       sessionId: targetSessionEntry?.sessionId,

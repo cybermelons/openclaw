@@ -74,6 +74,9 @@ export function buildEmbeddedSystemPrompt(params: {
     chatType?: ChatType;
     /** Supported message actions for the current channel (e.g., react, edit, unsend) */
     channelActions?: string[];
+    repoRoot?: string;
+    /** Authoritative working directory the model should treat as "here"; survives compaction. */
+    cwd?: string;
     activeProcessSessions?: ActiveProcessSessionReference[];
     activeNode?: string;
   };

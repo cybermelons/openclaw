@@ -33,6 +33,8 @@ type RuntimeInfoInput = {
   /** Supported message actions for the current channel (e.g., react, edit, unsend) */
   channelActions?: string[];
   repoRoot?: string;
+  /** Authoritative working directory the model should treat as "here"; survives compaction. */
+  cwd?: string;
   activeProcessSessions?: ActiveProcessSessionReference[];
   activeNode?: string;
 };
@@ -46,7 +48,9 @@ type SystemPromptRuntimeParams = {
 export function buildSystemPromptParams(params: {
   config?: OpenClawConfig;
   agentId?: string;
-  runtime: Omit<RuntimeInfoInput, "agentId">;
+  // repoRoot and cwd are resolved canonically below (prepared value or fresh resolution), so
+  // callers cannot pass them on `runtime` and have them silently overwritten.
+  runtime: Omit<RuntimeInfoInput, "agentId" | "repoRoot" | "cwd">;
   workspaceDir?: string;
   cwd?: string;
   preparedRepoRoot?: string | null;
@@ -56,6 +60,7 @@ export function buildSystemPromptParams(params: {
     : resolveSystemPromptRepoRoot(params);
   const userTimezone = resolveUserTimezone(params.config?.agents?.defaults?.userTimezone);
   const userDate = formatDateStamp(Date.now(), userTimezone);
+  const cwd = params.cwd?.trim() ? path.resolve(params.cwd) : undefined;
   return {
     runtimeInfo: {
       agentId: params.agentId,
@@ -63,6 +68,7 @@ export function buildSystemPromptParams(params: {
       activeNode:
         formatActiveNodeContextLabel(getCurrentActiveNodeContext()) ?? params.runtime.activeNode,
       repoRoot,
+      cwd,
     },
     userTimezone,
     userDate,
