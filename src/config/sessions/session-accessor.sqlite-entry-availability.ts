@@ -147,14 +147,16 @@ function readSessionIdentityEvidenceRows(
 
   const rowsBySessionId = new Map<string, SessionIdentityEvidenceRow[]>();
   const readableKeys = new Set<string>();
+  const blobSessionIdByKey = new Map<string, string>();
   for (const row of rowsByKey.values()) {
-    const rows = rowsBySessionId.get(row.current_session_id) ?? [];
-    rows.push(row);
-    rowsBySessionId.set(row.current_session_id, rows);
+    let entry: SessionEntry | undefined;
     if (row.entry_valid === 1) {
       try {
-        if (readCanonicalSqliteSessionEntryRow(database, row)) {
+        const parsed = readCanonicalSqliteSessionEntryRow(database, row);
+        if (parsed) {
+          entry = parsed;
           readableKeys.add(row.session_key);
+          blobSessionIdByKey.set(row.session_key, entry.sessionId);
         }
       } catch (error) {
         if (!isCanonicalSessionKeyMigrationRequiredError(error)) {
@@ -163,6 +165,10 @@ function readSessionIdentityEvidenceRows(
         // A corrupt row must not make unrelated placements in this store indeterminate.
       }
     }
+    const keyId = entry ? entry.sessionId : row.current_session_id;
+    const rows = rowsBySessionId.get(keyId) ?? [];
+    rows.push(row);
+    rowsBySessionId.set(keyId, rows);
   }
   return items.map((item): SessionIdentityEvidenceResult => {
     const exactRow = rowsByKey.get(item.sessionKey);
@@ -172,7 +178,7 @@ function readSessionIdentityEvidenceRows(
     if (
       exactRow &&
       readableKeys.has(exactRow.session_key) &&
-      exactRow.current_session_id === item.sessionId
+      blobSessionIdByKey.get(exactRow.session_key) === item.sessionId
     ) {
       return { status: "current", sessionKey: item.sessionKey };
     }
