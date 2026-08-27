@@ -539,9 +539,7 @@ async function readSqliteCliSessionEntries(params: {
     } catch (error) {
       if (!isSessionTranscriptProjectionUnavailableError(error)) {
         // Never break history loading on a store read; fall through to the file reader.
-        cliBackendLog.warn(
-          `sqlite cli session history read failed: ${formatErrorMessage(error)}`,
-        );
+        cliBackendLog.warn(`sqlite cli session history read failed: ${formatErrorMessage(error)}`);
         return undefined;
       }
       // Transient projection lag: the throw site already kicked the reconcile job,
@@ -551,9 +549,7 @@ async function readSqliteCliSessionEntries(params: {
       const elapsedMs = Date.now() - startedAt;
       const remainingBudgetMs = PROJECTION_RETRY_BUDGET_MS - elapsedMs;
       if (attempt >= PROJECTION_RETRY_MAX_ATTEMPTS || remainingBudgetMs <= 0) {
-        cliBackendLog.warn(
-          `sqlite cli session history read failed: ${formatErrorMessage(error)}`,
-        );
+        cliBackendLog.warn(`sqlite cli session history read failed: ${formatErrorMessage(error)}`);
         return undefined;
       }
       await sleep(Math.min(PROJECTION_RETRY_BACKOFF_MS, remainingBudgetMs));
