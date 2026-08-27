@@ -23,6 +23,7 @@ import {
 } from "./main-session-recovery-state.js";
 import {
   hasCurrentProcessOwner,
+  isSessionRecoveryStorePathQuarantined,
   mainSessionRecoveryLog,
   normalizeFiniteTimestamp,
   normalizeStringSet,
@@ -155,6 +156,11 @@ export async function markRestartAbortedMainSessions(params: {
   }
 
   for (const storePath of storePaths) {
+    // CORRUPTION-FALLBACK 6a: a sticky corrupt marker means this database's
+    // sessions must never be resumed, even by the active-run marking path.
+    if (isSessionRecoveryStorePathQuarantined(storePath, env)) {
+      continue;
+    }
     const storeResult = await markRecoveryStore({
       storePath,
       plan: (entry, sessionKey) => {

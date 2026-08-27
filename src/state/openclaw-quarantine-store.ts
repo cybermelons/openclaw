@@ -14,17 +14,21 @@ import {
 import { VERSION } from "../version.js";
 import { resolveOpenClawStateSqliteDir } from "./openclaw-state-db.paths.js";
 
-const OPENCLAW_QUARANTINE_SCHEMA_VERSION = 2;
+const OPENCLAW_QUARANTINE_SCHEMA_VERSION = 3;
 const OPENCLAW_QUARANTINE_BUSY_TIMEOUT_MS = 5_000;
 const OPENCLAW_QUARANTINE_DIR_MODE = 0o700;
 const OPENCLAW_QUARANTINE_FILE_MODE = 0o600;
 
 type OpenClawDatabaseKind = "agent" | "state";
 
-type OpenClawDatabaseQuarantine = {
+export type OpenClawDatabaseQuarantine = {
   kind: OpenClawDatabaseKind;
   quarantinedAt: number;
   reason: string;
+  /** The failing check name (e.g. "integrity_check", "SqliteSchemaVersionError"). Sticky-marker only. */
+  failingCheck?: string;
+  /** Where the quarantined corrupt file was moved. Sticky-marker only. */
+  quarantinedFilePath?: string;
 };
 
 function resolveQuarantineStorePath(env: NodeJS.ProcessEnv): string {
@@ -56,6 +60,18 @@ function configureQuarantineWriter(database: DatabaseSync, storePath: string): v
     database.exec(`
       BEGIN IMMEDIATE;
       ALTER TABLE quarantined_databases ADD COLUMN verified_generation TEXT;
+      ALTER TABLE quarantined_databases ADD COLUMN failing_check TEXT;
+      ALTER TABLE quarantined_databases ADD COLUMN quarantined_file_path TEXT;
+      PRAGMA user_version = ${OPENCLAW_QUARANTINE_SCHEMA_VERSION};
+      COMMIT;
+    `);
+    return;
+  }
+  if (userVersion === 2) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE quarantined_databases ADD COLUMN failing_check TEXT;
+      ALTER TABLE quarantined_databases ADD COLUMN quarantined_file_path TEXT;
       PRAGMA user_version = ${OPENCLAW_QUARANTINE_SCHEMA_VERSION};
       COMMIT;
     `);
@@ -69,7 +85,9 @@ function configureQuarantineWriter(database: DatabaseSync, storePath: string): v
       reason TEXT NOT NULL,
       quarantined_at INTEGER NOT NULL,
       writer_app_version TEXT,
-      verified_generation TEXT
+      verified_generation TEXT,
+      failing_check TEXT,
+      quarantined_file_path TEXT
     ) STRICT;
     PRAGMA user_version = ${OPENCLAW_QUARANTINE_SCHEMA_VERSION};
     COMMIT;
@@ -132,9 +150,10 @@ export function readOpenClawDatabaseQuarantine(
       );
     }
     const generationColumn = userVersion >= 2 ? ", verified_generation" : "";
+    const markerColumns = userVersion >= 3 ? ", failing_check, quarantined_file_path" : "";
     const row = database
       .prepare(
-        `SELECT kind, reason, quarantined_at${generationColumn} FROM quarantined_databases WHERE path = ? LIMIT 1`,
+        `SELECT kind, reason, quarantined_at${generationColumn}${markerColumns} FROM quarantined_databases WHERE path = ? LIMIT 1`,
       )
       .get(path.resolve(pathname)) as
       | {
@@ -142,6 +161,8 @@ export function readOpenClawDatabaseQuarantine(
           quarantined_at?: unknown;
           reason?: unknown;
           verified_generation?: unknown;
+          failing_check?: unknown;
+          quarantined_file_path?: unknown;
         }
       | undefined;
     if (!row) {
@@ -154,11 +175,23 @@ export function readOpenClawDatabaseQuarantine(
       !Number.isInteger(row.quarantined_at) ||
       (row.verified_generation !== undefined &&
         row.verified_generation !== null &&
-        typeof row.verified_generation !== "string")
+        typeof row.verified_generation !== "string") ||
+      (row.failing_check !== undefined &&
+        row.failing_check !== null &&
+        typeof row.failing_check !== "string") ||
+      (row.quarantined_file_path !== undefined &&
+        row.quarantined_file_path !== null &&
+        typeof row.quarantined_file_path !== "string")
     ) {
       throw new Error(`OpenClaw quarantine store ${storePath} contains an invalid row.`);
     }
-    if (typeof row.verified_generation === "string") {
+    // The sticky corrupt-marker (failing_check/quarantined_file_path set) is
+    // deliberately NOT generation-gated: it must survive a later clean open of
+    // a restored/reinitialized file until an operator or verified restore
+    // clears it (CORRUPTION-FALLBACK Item 3). Generation-gating below applies
+    // only to the background-verifier quarantine path, which predates it.
+    const isStickyMarker = typeof row.failing_check === "string";
+    if (!isStickyMarker && typeof row.verified_generation === "string") {
       let verifiedGeneration: SqliteFileGeneration;
       try {
         verifiedGeneration = parseSqliteFileGeneration(row.verified_generation);
@@ -174,7 +207,15 @@ export function readOpenClawDatabaseQuarantine(
         return undefined;
       }
     }
-    return { kind: row.kind, quarantinedAt: row.quarantined_at, reason: row.reason };
+    return {
+      kind: row.kind,
+      quarantinedAt: row.quarantined_at,
+      reason: row.reason,
+      ...(typeof row.failing_check === "string" ? { failingCheck: row.failing_check } : {}),
+      ...(typeof row.quarantined_file_path === "string"
+        ? { quarantinedFilePath: row.quarantined_file_path }
+        : {}),
+    };
   } finally {
     database.close();
   }
@@ -187,6 +228,9 @@ export function recordOpenClawDatabaseQuarantine(options: {
   kind: OpenClawDatabaseKind;
   path: string;
   reason: string;
+  /** Set only for the sticky corrupt-marker path (CORRUPTION-FALLBACK Item 3). */
+  failingCheck?: string;
+  quarantinedFilePath?: string;
 }): boolean {
   const serializedGeneration = options.generation
     ? serializeSqliteFileGeneration(options.generation)
@@ -199,14 +243,17 @@ export function recordOpenClawDatabaseQuarantine(options: {
           .prepare(
             `
               INSERT INTO quarantined_databases (
-                path, kind, reason, quarantined_at, writer_app_version, verified_generation
-              ) VALUES (?, ?, ?, ?, ?, ?)
+                path, kind, reason, quarantined_at, writer_app_version, verified_generation,
+                failing_check, quarantined_file_path
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(path) DO UPDATE SET
                 kind = excluded.kind,
                 reason = excluded.reason,
                 quarantined_at = excluded.quarantined_at,
                 writer_app_version = excluded.writer_app_version,
-                verified_generation = excluded.verified_generation
+                verified_generation = excluded.verified_generation,
+                failing_check = excluded.failing_check,
+                quarantined_file_path = excluded.quarantined_file_path
             `,
           )
           .run(
@@ -216,6 +263,8 @@ export function recordOpenClawDatabaseQuarantine(options: {
             Date.now(),
             VERSION,
             serializedGeneration,
+            options.failingCheck ?? null,
+            options.quarantinedFilePath ?? null,
           );
         database.exec("COMMIT;");
         return true;
@@ -227,6 +276,18 @@ export function recordOpenClawDatabaseQuarantine(options: {
   } catch {
     return false;
   }
+}
+
+/**
+ * True when a quarantine row is the sticky corrupt-marker (CORRUPTION-FALLBACK
+ * Item 3) rather than the background-verifier's generation-gated quarantine.
+ * Startup recovery guards consult this to decide whether to skip a session's
+ * database rather than every quarantine reason.
+ */
+export function isOpenClawDatabaseCorruptMarker(
+  quarantine: Pick<OpenClawDatabaseQuarantine, "failingCheck"> | undefined,
+): boolean {
+  return typeof quarantine?.failingCheck === "string";
 }
 
 /** Clear one authoritative quarantine decision. */

@@ -15,6 +15,7 @@ import {
   DEFAULT_RECOVERY_DELAY_MS,
   type ExhaustedRestartRecoveryTarget,
   type ExpectedRestartRecoveryTarget,
+  isSessionRecoveryStorePathQuarantined,
   mainSessionRecoveryLog,
   MAX_RECOVERY_RETRIES,
   RETRY_BACKOFF_MULTIPLIER,
@@ -150,6 +151,15 @@ async function recoverExpectedRestartRecovery(params: {
   stateDir?: string;
   gatewayRuntime: GatewayRecoveryRuntime;
 }): Promise<RecoveryCounts> {
+  // CORRUPTION-FALLBACK 6a: a sticky corrupt marker means this database's
+  // sessions must never be resumed, including targeted Control UI retries.
+  const recoveryEnv =
+    params.stateDir === undefined
+      ? process.env
+      : { ...process.env, OPENCLAW_STATE_DIR: params.stateDir };
+  if (isSessionRecoveryStorePathQuarantined(params.storePath, recoveryEnv)) {
+    return { recovered: 0, failed: 0, skipped: 1 };
+  }
   const loadExpected = () =>
     params.expectedClaim
       ? loadExpectedRestartRecoveryClaim({

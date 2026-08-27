@@ -52,6 +52,10 @@ import {
   runOpenClawAgentWriteTransaction,
 } from "./openclaw-agent-db.js";
 import {
+  isOpenClawDatabaseCorruptMarker,
+  readOpenClawDatabaseQuarantine,
+} from "./openclaw-quarantine-store.js";
+import {
   closeOpenClawStateDatabaseForTest,
   OPENCLAW_SQLITE_BUSY_TIMEOUT_MS,
   openOpenClawStateDatabase,
@@ -1315,7 +1319,7 @@ describe("openclaw agent database", () => {
   });
 
   it("opens a v13 database that already contains additive board storage", () => {
-    expect(OPENCLAW_AGENT_SCHEMA_VERSION).toBe(17);
+    expect(OPENCLAW_AGENT_SCHEMA_VERSION).toBe(18);
     const stateDir = createTempStateDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };
     const databasePath = materializeV13WorkerAgentDatabase(stateDir);
@@ -1541,7 +1545,7 @@ describe("openclaw agent database", () => {
   });
 
   it("keeps additive heartbeat repair while upgrading schema version 12", () => {
-    expect(OPENCLAW_AGENT_SCHEMA_VERSION).toBe(17);
+    expect(OPENCLAW_AGENT_SCHEMA_VERSION).toBe(18);
     const stateDir = createTempStateDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };
     const databasePath = materializeV13WorkerAgentDatabase(stateDir);
@@ -4290,10 +4294,24 @@ describe("openclaw agent database", () => {
     createUnsafeSchemaMetaIndexDrift(databasePath);
 
     const { DatabaseSync } = requireNodeSqlite();
-    expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
-      /integrity_check failed.*unsafe_schema_meta_role/iu,
+    // CORRUPTION-FALLBACK 6a: a terminal integrity failure at open now
+    // quarantines the corrupt file and reinitializes rather than throwing;
+    // the sticky corrupt-marker is what proves the failure was observed.
+    openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    const quarantine = readOpenClawDatabaseQuarantine(databasePath, { env });
+    expect(isOpenClawDatabaseCorruptMarker(quarantine)).toBe(true);
+    expect(quarantine?.reason).toMatch(/integrity_check failed.*unsafe_schema_meta_role/iu);
+    closeOpenClawAgentDatabasesForTest();
+    closeOpenClawStateDatabaseForTest();
+
+    // The recovered file at databasePath is now a fresh reinit; verify the
+    // lower-level schema-check layer independently still rejects the same
+    // drift shape on its own freshly-drifted file (unaffected by 6a).
+    const secondDatabasePath = materializeCurrentWorkerAgentDatabase(
+      makeTempDir(agentDbTempDirs, "openclaw-agent-db-schema-meta-drift-"),
     );
-    const independentlyManaged = new DatabaseSync(databasePath);
+    createUnsafeSchemaMetaIndexDrift(secondDatabasePath);
+    const independentlyManaged = new DatabaseSync(secondDatabasePath);
     try {
       expect(() =>
         ensureOpenClawAgentDatabaseSchema(independentlyManaged, {
@@ -4333,9 +4351,17 @@ describe("openclaw agent database", () => {
     const databasePath = materializeCurrentWorkerAgentDatabase(stateDir);
     createUnsafeIndexDrift(databasePath);
 
-    expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
+    // CORRUPTION-FALLBACK 6a: terminal integrity failures at open now
+    // quarantine the corrupt file and recover instead of throwing.
+    const recovered = openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    expect(recovered.path).toBe(databasePath);
+    const quarantine = readOpenClawDatabaseQuarantine(databasePath, { env });
+    expect(isOpenClawDatabaseCorruptMarker(quarantine)).toBe(true);
+    expect(quarantine?.reason).toMatch(
       /integrity_check failed.*missing from index unsafe_index_records_value/iu,
     );
+    expect(quarantine?.quarantinedFilePath).toBeTruthy();
+    expect(fs.existsSync(quarantine!.quarantinedFilePath!)).toBe(true);
   });
 
   it("rechecks integrity after a validated handle is physically reopened", () => {
@@ -4346,7 +4372,13 @@ describe("openclaw agent database", () => {
     closeOpenClawStateDatabaseForTest();
     createUnsafeIndexDrift(databasePath);
 
-    expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
+    // Same 6a recovery path, triggered on a reopen of a previously-validated
+    // handle rather than a first open.
+    const recovered = openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    expect(recovered.path).toBe(databasePath);
+    const quarantine = readOpenClawDatabaseQuarantine(databasePath, { env });
+    expect(isOpenClawDatabaseCorruptMarker(quarantine)).toBe(true);
+    expect(quarantine?.reason).toMatch(
       /integrity_check failed.*missing from index unsafe_index_records_value/iu,
     );
   });
@@ -4414,7 +4446,13 @@ describe("openclaw agent database", () => {
       before.close();
     }
 
-    expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
+    // CORRUPTION-FALLBACK 6a: the drift is proven corruption regardless of a
+    // pending migration, so it still quarantines-and-recovers rather than
+    // exposing a half-migrated, corrupt handle.
+    openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    const quarantine = readOpenClawDatabaseQuarantine(databasePath, { env });
+    expect(isOpenClawDatabaseCorruptMarker(quarantine)).toBe(true);
+    expect(quarantine?.reason).toMatch(
       /integrity_check failed.*missing from index unsafe_index_records_value/iu,
     );
   });
@@ -4433,7 +4471,11 @@ describe("openclaw agent database", () => {
       before.close();
     }
 
-    expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
+    // Same 6a recovery path for an unversioned (v0) drifted database.
+    openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    const quarantine = readOpenClawDatabaseQuarantine(databasePath, { env });
+    expect(isOpenClawDatabaseCorruptMarker(quarantine)).toBe(true);
+    expect(quarantine?.reason).toMatch(
       /integrity_check failed.*missing from index unsafe_index_records_value/iu,
     );
   });
@@ -4466,7 +4508,12 @@ describe("openclaw agent database", () => {
       corrupted.close();
     }
 
-    expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
+    // CORRUPTION-FALLBACK 6a: a foreign-key violation is a terminal integrity
+    // failure too — quarantine-and-recover, not a bare throw.
+    openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    const quarantine = readOpenClawDatabaseQuarantine(databasePath, { env });
+    expect(isOpenClawDatabaseCorruptMarker(quarantine)).toBe(true);
+    expect(quarantine?.reason).toMatch(
       /foreign_key_check failed.*session_windows row 1 references session_nodes \(foreign key 1\)/iu,
     );
   });

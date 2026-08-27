@@ -232,14 +232,26 @@ export function assertSupportedAgentSchemaVersion(db: DatabaseSync, pathname: st
 export function assertCanonicalAgentMediaPersistenceVersion(
   db: DatabaseSync,
   pathname: string,
+  options?: { allowPendingOwnedMigration?: boolean },
 ): void {
   const userVersion = readSqliteUserVersion(db);
   const hasApplicationSchema = db
     .prepare("SELECT 1 FROM sqlite_master WHERE substr(name, 1, 7) <> 'sqlite_' LIMIT 1")
     .get();
-  const isNewUnownedDatabase =
-    userVersion === 0 && readExistingAgentSchemaMeta(db) === null && !hasApplicationSchema;
-  if (userVersion < OPENCLAW_AGENT_SCHEMA_VERSION && !isNewUnownedDatabase) {
+  const existingMeta = readExistingAgentSchemaMeta(db);
+  const isNewUnownedDatabase = userVersion === 0 && existingMeta === null && !hasApplicationSchema;
+  // A recognized OpenClaw agent database (schema_meta role "agent") that is
+  // below head is either mid-open-time-migration or a just-restored LKG
+  // snapshot: callers that pass allowPendingOwnedMigration run this check
+  // again after ensureOpenClawAgentSchema, so it is safe to defer here
+  // rather than reject a legitimate pre-head database before it can migrate.
+  const isPendingOwnedMigration =
+    Boolean(options?.allowPendingOwnedMigration) && existingMeta?.role === "agent";
+  if (
+    userVersion < OPENCLAW_AGENT_SCHEMA_VERSION &&
+    !isNewUnownedDatabase &&
+    !isPendingOwnedMigration
+  ) {
     throw new OpenClawAgentDatabaseMediaMigrationRequiredError(pathname, userVersion);
   }
 }

@@ -11,8 +11,13 @@ import {
   hasSessionEntriesByStatusReadOnly,
   type SessionTranscriptTurnExpectedState,
 } from "../../config/sessions/session-accessor.js";
+import { resolveUnsuffixedSqliteTargetFromSessionStorePath } from "../../config/sessions/session-sqlite-target.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import {
+  isOpenClawDatabaseCorruptMarker,
+  readOpenClawDatabaseQuarantine,
+} from "../../state/openclaw-quarantine-store.js";
 import { resolveAgentSessionDirs } from "../session-dirs.js";
 
 export const mainSessionRecoveryLog = createSubsystemLogger("main-session-restart-recovery");
@@ -79,6 +84,22 @@ export function hasCurrentProcessOwner(params: {
   return params.activeSessionIds.size === 0 && params.activeSessionKeys.has(params.sessionKey);
 }
 
+/**
+ * CORRUPTION-FALLBACK.md Item 3 / PHASE-1.md §6a: a sticky corrupt marker on a
+ * session's agent database means recovery must never resume its sessions,
+ * even after the file has been quarantined and replaced by a clean restore or
+ * empty reinit. Only an operator/doctor action or a verified restore clears
+ * the marker — a later clean open must not silently clear it for us.
+ */
+export function isSessionRecoveryStorePathQuarantined(
+  storePath: string,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  const sqliteTarget = resolveUnsuffixedSqliteTargetFromSessionStorePath(storePath);
+  const quarantine = readOpenClawDatabaseQuarantine(sqliteTarget.path, { env });
+  return isOpenClawDatabaseCorruptMarker(quarantine);
+}
+
 export async function resolveRestartRecoveryStorePaths(params: {
   cfg?: OpenClawConfig;
   stateDir?: string;
@@ -114,7 +135,10 @@ export async function resolveRestartRecoveryStorePaths(params: {
   }
   // Agent databases also hold auth and model-catalog state. Enter the writer
   // lane only when the session owner proves that a running row may need repair.
+  // Marker check comes first: it must gate out a quarantined database before
+  // hasSessionEntriesByStatusReadOnly would otherwise open it.
   return [...storePaths]
+    .filter((storePath) => !isSessionRecoveryStorePathQuarantined(storePath, env))
     .filter((storePath) => hasSessionEntriesByStatusReadOnly({ env, storePath }, ["running"]))
     .toSorted((a, b) => a.localeCompare(b));
 }

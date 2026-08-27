@@ -39,6 +39,7 @@ import type { refreshLatestUpdateRestartSentinel } from "./server-restart-sentin
 import type { GatewaySidecarStartupMode } from "./server-sidecar-startup-mode.js";
 import { scheduleContextCachePrewarm } from "./server-startup-context-cache-prewarm.js";
 import { scheduleGatewayHandlerPrewarm } from "./server-startup-handler-prewarm.js";
+import { scheduleAgentDatabaseLkgPublish } from "./server-startup-lkg-publish.js";
 import type { logGatewayStartup } from "./server-startup-log.js";
 import {
   createGatewayStartupOutcomeRecorder,
@@ -1473,6 +1474,7 @@ export async function startGatewayPostAttachRuntime(
           const newGatewayLifetimeSidecars = [
             scheduleContextCachePrewarm(params),
             scheduleGatewayHandlerPrewarm(params),
+            scheduleAgentDatabaseLkgPublish(params),
             ...(mainSessionRecoverySidecar ? [mainSessionRecoverySidecar] : []),
           ];
           if (params.providerAuthPrewarm && params.providerAuthPrewarm.enabled !== false) {
