@@ -89,15 +89,17 @@ Phase 4 is landable when: CS-1..CS-6 merged in order; T1/T2/T3 green; the rewrit
 
 Per-CS landed state on `rearch/session-store`. Not merged to `main`, not deployed. Tracking issue: cybermelons/openclaw#38.
 
-| CS   | SHA           | State   | Gates                                                                                                                              |
-| ---- | ------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| CS-1 | `2bdbbe889dd` | landed  | audit doc reviewed; 3 stale spec line-refs corrected + re-verified against tree                                                    |
-| §3a  | `2d26c882c83` | landed  | marker shape pinned (dedicated `session_resume_epoch` table)                                                                       |
-| CS-2 | `7e4d69ba170` | landed  | marker CRUD 4/4, migration 2/2, doctor 15/15, phase-1 CAS 10/10, oxlint clean; trigger seeds new sessions                          |
-| CS-3 | `4619864a0fb` | landed  | reconcile+drainTailForResume 8/8, recovery 160/160, Phase-0 pin 3/3 (unflipped), doctor 15/15; timeout fallthrough deleted         |
-| CS-4 | `f6046d322e8` | landed  | T2 4/4, Phase-0 pin 3/3 (flipped for state c), reader 31/31, doctor 15/15, oxlint clean                                            |
-| CS-5 | `feadda719ed` | landed  | fallback 7/7, reader 31/31, doctor 15/15, oxlint clean (session-history.ts max-lines 865→720, still over 700 — recorded follow-up) |
-| CS-6 | —             | pending | Phase-4 wall consolidation + #24 seam doc                                                                                          |
+| CS   | SHA           | State  | Gates                                                                                                                              |
+| ---- | ------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| CS-1 | `2bdbbe889dd` | landed | audit doc reviewed; 3 stale spec line-refs corrected + re-verified against tree                                                    |
+| §3a  | `2d26c882c83` | landed | marker shape pinned (dedicated `session_resume_epoch` table)                                                                       |
+| CS-2 | `7e4d69ba170` | landed | marker CRUD 4/4, migration 2/2, doctor 15/15, phase-1 CAS 10/10, oxlint clean; trigger seeds new sessions                          |
+| CS-3 | `4619864a0fb` | landed | reconcile+drainTailForResume 8/8, recovery 160/160, Phase-0 pin 3/3 (unflipped), doctor 15/15; timeout fallthrough deleted         |
+| CS-4 | `f6046d322e8` | landed | T2 4/4, Phase-0 pin 3/3 (flipped for state c), reader 31/31, doctor 15/15, oxlint clean                                            |
+| CS-5 | `feadda719ed` | landed | fallback 7/7, reader 31/31, doctor 15/15, oxlint clean (session-history.ts max-lines 865→720, still over 700 — recorded follow-up) |
+| CS-6 | `bb74d0d281d` | landed | full Phase-4 wall 205/205, oxlint clean; barrel exports #24 seam; fixed latent T3 self-grep probe bug                              |
+
+**Phase 4 complete.** CS-1..CS-6 all landed on `rearch/session-store`. Next: full Phase-0..4 wall (§8 landability gate), then the single final PR. No deploy — soak is a post-merge human step.
 
 **Deviations from spec, accepted:**
 
