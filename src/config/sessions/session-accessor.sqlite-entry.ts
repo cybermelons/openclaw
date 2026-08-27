@@ -429,8 +429,8 @@ export function listSessionTranscriptInstances(
 export function readSessionUpdatedAtCore(scope: SessionAccessScope): number | undefined {
   const resolved = resolveSqliteScope(scope);
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
-  const row = readSessionEntryRow(database, resolved.sessionKey)?.row;
-  return row ? coerceSqliteNumber(row.updated_at) : undefined;
+  const entry = readSessionEntryRow(database, resolved.sessionKey)?.entry;
+  return entry?.updatedAt;
 }
 
 /** Applies a partial entry update to the additive SQLite session store. */

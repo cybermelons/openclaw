@@ -9,6 +9,9 @@ export function hasValidSessionEntryIdentity(entry: {
   );
 }
 
+/**
+ * Consistency audit. Compares write-only index vs blob truth. NOT a read path. Powers doctor canonical-key repair; do not delete (Phase 3 CS-6).
+ */
 export function parseSqliteSessionEntryRecord(row: {
   current_session_id?: string;
   entry_json: string;
