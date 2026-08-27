@@ -411,7 +411,11 @@ function controlUiPrecompressedAssetsPlugin(buildOutDir: string): Plugin {
         // Vite's post-build import analysis rewrites lazy preload markers in a
         // later generateBundle hook. Read from disk here so sidecars always
         // encode the exact final bytes that the identity response serves.
-        const source = fs.readFileSync(path.join(buildOutDir, output.fileName));
+        const assetPath = path.join(buildOutDir, output.fileName);
+        // Entries can appear in the manifest without a file on disk (chunks
+        // emitted by another environment pass); skip those rather than throw.
+        if (!fs.existsSync(assetPath)) continue;
+        const source = fs.readFileSync(assetPath);
         for (const variant of createControlUiPrecompressedAssetVariants(output.fileName, source)) {
           fs.writeFileSync(path.join(buildOutDir, variant.fileName), variant.source);
         }
