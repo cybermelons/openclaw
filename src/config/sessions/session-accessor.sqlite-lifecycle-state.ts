@@ -13,6 +13,7 @@ import type {
   MaterializedSessionStateDeletePlan,
   SessionStateDeletePlan,
 } from "./session-accessor.sqlite-archive.js";
+import { readExactSessionEntryRowForCanonicalRepair } from "./session-accessor.sqlite-canonical-repair.js";
 import type {
   SessionEntryLifecycleRemoval,
   SessionEntryLifecycleUpsert,
@@ -38,7 +39,8 @@ import { coerceSqliteNumber } from "./session-accessor.sqlite-normalize.js";
 import { loadTranscriptEventsFromDatabase } from "./session-accessor.sqlite-read.js";
 import { collectSessionStateIdsForEntry } from "./session-accessor.sqlite-references.js";
 import { cloneSessionEntry, getSessionKysely } from "./session-accessor.sqlite-scope.js";
-import { parseSessionEntryJson as parseSessionEntryRow } from "./session-accessor.sqlite-status.js";
+import { SessionConflictError } from "./session-conflict-error.js";
+import { readSessionEntryOrNull } from "./session-entry-parse.js";
 import { buildSessionResetBoundaryPlan } from "./session-reset-boundary-event.js";
 import { deleteSessionTranscriptIndexInTransaction } from "./session-transcript-index.js";
 import type { SessionEntry } from "./types.js";
@@ -52,9 +54,13 @@ export function shouldRemoveSessionEntry(
   if (!entry) {
     return false;
   }
+  // sqliteSessionEntriesEqual, not raw JSON.stringify: plan-time (projectSessionEntry)
+  // and commit-time (readCanonicalSqliteSessionEntryRow) reads intentionally differ on
+  // participants/participantCount when empty (Phase 2 CS-4, §4); raw JSON would treat
+  // that shape-only gap as a conflict and drop every removal.
   if (
     removal.expectedEntry !== undefined &&
-    JSON.stringify(entry) !== JSON.stringify(removal.expectedEntry)
+    !sqliteSessionEntriesEqual(entry, removal.expectedEntry)
   ) {
     return false;
   }
@@ -157,7 +163,7 @@ export function readReferencedSessionIds(
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryRow(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (!entry) {
       continue;
     }
@@ -189,7 +195,7 @@ export function readReferencedSessionIdsAfterTargetMutation(
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryRow(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (!entry) {
       continue;
     }
@@ -244,8 +250,17 @@ export function deleteMaterializedSessionStatePlans(
       continue;
     }
     const currentSnapshot = readSessionStateDeleteSnapshot(database.db, plan.sessionId);
+    // Entry-CAS-snapshot-structural (PHASE-1.md §4 escape hatch): this
+    // snapshot spans multiple tables, not one session_nodes row, so it
+    // carries no `revision` — value-compare in both modes; shape parity
+    // via always throwing SessionConflictError.
     if (!sqliteSessionStateDeleteSnapshotsEqual(currentSnapshot, plan.snapshot)) {
-      throw new Error(`SQLite session state changed before deletion for ${plan.sessionId}`);
+      throw new SessionConflictError({
+        actualRevision: -1,
+        expectedRevision: -1,
+        key: plan.sessionId,
+        message: `SQLite session state changed before deletion for ${plan.sessionId}`,
+      });
     }
     if (plan.archive) {
       persistSessionTranscriptArchive(database, plan);
@@ -320,6 +335,32 @@ export async function projectSessionEntryLifecycleMutation(
   const store = readSessionEntryStore(database, {
     allowCanonicalRepair: params.allowCanonicalRepair === true,
   });
+  // Snapshot the DB-row revision for every key this mutation may touch, before
+  // `store` is locally mutated below (removals delete keys, upserts overwrite
+  // them). Revision lives on the row, not the in-memory projected entry, so it
+  // must be read once here and threaded alongside `expectedEntry` for the
+  // write-transaction recompare (PHASE-1.md §3).
+  const revisionAtSnapshot = new Map<string, number>();
+  for (const key of uniqueStrings([
+    ...params.removals.map((removal) =>
+      removal.exactStoredKey ? removal.sessionKey : removal.sessionKey.trim(),
+    ),
+    ...params.upserts.map((upsert) => upsert.sessionKey.trim()),
+  ])) {
+    if (!key) {
+      continue;
+    }
+    const revision = (
+      params.allowCanonicalRepair === true
+        ? readExactSessionEntryRowForCanonicalRepair(database, key, {
+            allowMalformedRowRepair: true,
+          })
+        : readExactSessionEntryRow(database, key)
+    )?.row.revision;
+    if (revision !== undefined) {
+      revisionAtSnapshot.set(key, revision);
+    }
+  }
   const removedEntries: Array<{ archiveTranscript: boolean; entry: SessionEntry }> = [];
   const removedKeysToArchive = new Set<string>();
   const changedSessionKeys = new Set<string>();
@@ -330,9 +371,16 @@ export async function projectSessionEntryLifecycleMutation(
     if (removal.expectedRawEntryJson !== undefined) {
       const currentRawEntryJson = readExactSessionEntryJsonForCanonicalRepair(database, sessionKey);
       if (currentRawEntryJson !== removal.expectedRawEntryJson) {
-        throw new Error(
-          `SQLite session entry changed before raw lifecycle removal for ${sessionKey}`,
-        );
+        // Doctor-repair-only raw-JSON compare (see session-accessor.sqlite-projection.ts
+        // readProjectedRemovalEntry for the identical justification): the caller's
+        // snapshot is an unparseable raw blob with no correlated row revision at
+        // capture time. Kept on raw-value compare in both modes, shape-parity only.
+        throw new SessionConflictError({
+          actualRevision: -1,
+          expectedRevision: -1,
+          key: sessionKey,
+          message: `SQLite session entry changed before raw lifecycle removal for ${sessionKey}`,
+        });
       }
       entry = removal.expectedEntry ? cloneSessionEntry(removal.expectedEntry) : undefined;
     }
@@ -355,6 +403,16 @@ export async function projectSessionEntryLifecycleMutation(
     }
     projectedRemovals.push({
       expectedEntry: cloneSessionEntry(entry),
+      // Raw-JSON-doctor-path removals are validated by the doctor-repair
+      // JSON string compare above; the commit-phase re-read
+      // (`readProjectedRemovalCurrentRevision`) always reports the sentinel
+      // -1 for these, so the snapshot side must match that sentinel rather
+      // than the row's real revision, or a legitimate repair removal
+      // false-conflicts (0 !== -1) even though nothing raced it.
+      expectedRevision:
+        removal.expectedRawEntryJson !== undefined
+          ? -1
+          : (revisionAtSnapshot.get(sessionKey) ?? -1),
       removal,
       sessionKey,
     });
@@ -368,6 +426,15 @@ export async function projectSessionEntryLifecycleMutation(
     changedSessionKeys.add(sessionKey);
     delete store[sessionKey];
   }
+  // Session keys with a raw-JSON-doctor-path removal targeting them (see the
+  // `expectedRevision` comment below): needed so a same-key upsert (rewriting
+  // a malformed row in place) also compares against the commit-phase sentinel
+  // instead of the row's real revision.
+  const rawEntryJsonRemovalKeys = new Set(
+    params.removals
+      .filter((removal) => removal.expectedRawEntryJson !== undefined)
+      .map((removal) => (removal.exactStoredKey ? removal.sessionKey : removal.sessionKey.trim())),
+  );
   const upsertedEntries: ProjectedLifecycleMutation["upsertedEntries"] = [];
   for (const upsert of params.upserts) {
     const sessionKey = upsert.sessionKey.trim();
@@ -403,6 +470,14 @@ export async function projectSessionEntryLifecycleMutation(
         : undefined;
     upsertedEntries.push({
       expectedEntry,
+      // Same-key raw-JSON-doctor-path rewrite (removal + upsert target the
+      // same malformed row): the commit-phase compare treats this upsert as
+      // the paired removal's `sameKeyRemoval` and re-reads its current
+      // revision via the removal's sentinel path (always -1 for raw-JSON),
+      // so this upsert's expected value must match that same sentinel.
+      expectedRevision: rawEntryJsonRemovalKeys.has(sessionKey)
+        ? -1
+        : (revisionAtSnapshot.get(sessionKey) ?? -1),
       sessionKey,
       entry: cloned,
       ...(resetBoundaryPlan ? { resetBoundaryPlan } : {}),
@@ -491,7 +566,7 @@ export function collectProjectedReferencedSessionIds(params: {
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryRow(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (!entry) {
       continue;
     }
@@ -520,7 +595,10 @@ function deleteSqliteSessionStateRows(database: OpenClawAgentDatabase, sessionId
 
 // Plans orphan cleanup without file writes or row deletion; finalization
 // handles archive durability before removing rows.
-function planSqliteOrphanLifecycleTranscriptStateDeletes(params: {
+// Exported for direct testing (Phase 3 §8c blob-reverify pin) — the full
+// planSessionLifecycleArtifactCleanup pipeline requires wiring reclaimability/
+// marker gates that are orthogonal to what this pin proves.
+export function planSqliteOrphanLifecycleTranscriptStateDeletes(params: {
   agentId?: string;
   archiveRemovedEntryTranscripts: boolean;
   archiveDirectory: string;
@@ -548,10 +626,36 @@ function planSqliteOrphanLifecycleTranscriptStateDeletes(params: {
     if (
       !sessionKeyBelongsToAgent(row.session_key, params.agentId) ||
       params.referencedSessionIds.has(row.session_id) ||
-      params.excludedSessionIds?.has(row.session_id) ||
-      (params.pluginOwnerId && row.plugin_owner_id && row.plugin_owner_id !== params.pluginOwnerId)
+      params.excludedSessionIds?.has(row.session_id)
     ) {
       continue;
+    }
+    // §8c: `plugin_owner_id` is a projected column that can diverge from the
+    // owning node's blob. A column-only mismatch must not gate this delete —
+    // re-verify against the owning session_nodes row's blob `pluginOwnerId`
+    // (mirrors planSessionLifecycleArtifactCleanup below, which re-checks
+    // `entry?.pluginOwnerId` rather than trusting a projected column).
+    if (params.pluginOwnerId && row.plugin_owner_id) {
+      const ownerNodeRow = executeSqliteQueryTakeFirstSync(
+        params.database.db,
+        db
+          .selectFrom("session_nodes")
+          .select(["entry_json", "session_key", "current_session_id", "updated_at"])
+          .where("session_key", "=", row.session_key),
+      );
+      // EXCEPTION: if the owning node row is absent or its blob is unparseable/
+      // corrupt, this is a true orphan with no usable blob to re-verify against —
+      // the column is the only signal available, so fall back to the column check.
+      const ownerEntry = ownerNodeRow
+        ? readSessionEntryOrNull(ownerNodeRow.session_key, ownerNodeRow)
+        : undefined;
+      if (ownerEntry) {
+        if (ownerEntry.pluginOwnerId && ownerEntry.pluginOwnerId !== params.pluginOwnerId) {
+          continue;
+        }
+      } else if (row.plugin_owner_id !== params.pluginOwnerId) {
+        continue;
+      }
     }
     if (
       !sqliteTranscriptStateIsReclaimable({
@@ -627,7 +731,7 @@ export function planSessionLifecycleArtifactCleanup(
     ) {
       continue;
     }
-    const entry = parseSessionEntryRow(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     const sessionIds = uniqueStrings([
       row.current_session_id,
       ...(entry ? collectSessionStateIdsForEntry(entry) : []),
@@ -716,10 +820,19 @@ export function assertPlannedLifecycleArtifactEntriesUnchanged(
   database: OpenClawAgentDatabase,
   entries: readonly SessionEntryRemovalPlan[],
 ): void {
+  // Entry-CAS-snapshot-structural (PHASE-1.md §4 escape hatch): `entries`
+  // is produced by 3 independent bulk-read call sites, none of which
+  // select `revision` — value-compare in both modes; shape parity via
+  // always throwing SessionConflictError.
   for (const planned of entries) {
-    const current = readExactSessionEntryRow(database, planned.sessionKey)?.entry;
-    if (!sqliteSessionEntriesEqual(current, planned.expectedEntry)) {
-      throw new Error(`SQLite lifecycle cleanup entry changed for ${planned.sessionKey}`);
+    const currentRow = readExactSessionEntryRow(database, planned.sessionKey);
+    if (!sqliteSessionEntriesEqual(currentRow?.entry, planned.expectedEntry)) {
+      throw new SessionConflictError({
+        actualRevision: currentRow?.row.revision ?? -1,
+        expectedRevision: -1,
+        key: planned.sessionKey,
+        message: `SQLite lifecycle cleanup entry changed for ${planned.sessionKey}`,
+      });
     }
   }
 }

@@ -9,8 +9,9 @@ import {
   resolveSqliteScope,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
-import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
 import type { SessionEntryListScope } from "./session-accessor.types.js";
+import { projectSessionEntry } from "./session-entry-parse.js";
+import { isSessionRowCorruptError } from "./session-row-corrupt-error.js";
 import { projectCanonicalSessionEntryShape } from "./store-entry-shape.js";
 import type { SessionEntry } from "./types.js";
 
@@ -145,7 +146,16 @@ export function listSqliteSessionEntriesWithCanonicalOwnerEvidence(
         ]),
     ).rows;
     const persistedEntries = new Map(
-      rows.map((row) => [row.session_key, parseSessionEntryJson(row)] as const),
+      rows.map((row) => {
+        try {
+          return [row.session_key, projectSessionEntry(row.session_key, row)] as const;
+        } catch (error) {
+          if (!isSessionRowCorruptError(error)) {
+            throw error;
+          }
+          return [row.session_key, null] as const;
+        }
+      }),
     );
     const validSessionKeysById = new Map<string, string[]>();
     for (const row of rows) {

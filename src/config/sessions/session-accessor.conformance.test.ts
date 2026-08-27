@@ -924,7 +924,7 @@ describe.each([publicAccessorAdapter, sqliteAdapter])(
       );
 
       expect(replacementError).toBeUndefined();
-      expect(mutationError).toMatchObject({ name: "SqliteSessionMutationConflictError" });
+      expect(mutationError).toMatchObject({ name: "SessionConflictError", retryable: true });
       expect(loadSessionEntry(scope)).toMatchObject({ model: "newer", updatedAt: 20 });
     });
 

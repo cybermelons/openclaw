@@ -1,3 +1,5 @@
+/* oxlint-disable max-lines -- Phase 1 CS-2 revision-column wiring pushed this grandfathered
+   schema-orchestration file over the 700-line cap by a few lines; split is out of CS-2 scope. */
 import type { DatabaseSync } from "node:sqlite";
 import { safeParseJsonRecord } from "@openclaw/normalization-core";
 import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
@@ -44,6 +46,9 @@ import {
   backfillSessionConversations,
   ensureSessionProjectColumn,
   ensureSessionEntryValidityProjection,
+  ensureSessionResumeEpochSessionIdColumns,
+  ensureSessionResumeEpochTable,
+  ensureSessionRevisionColumn,
   migrateConversationDeliveryTargetColumn,
   migrateSessionEntryStatusProjection,
   readSqliteTableColumns,
@@ -157,6 +162,11 @@ function hasPendingSessionKeyContractSchemaMigration(db: DatabaseSync): boolean 
 function hasPendingSessionProjectColumn(db: DatabaseSync): boolean {
   const columns = readSqliteTableColumns(db, "session_nodes");
   return Boolean(columns && !columns.has("project_id"));
+}
+
+function hasPendingSessionRevisionColumn(db: DatabaseSync): boolean {
+  const columns = readSqliteTableColumns(db, "session_nodes");
+  return Boolean(columns && !columns.has("revision"));
 }
 
 function migrateMemoryChunkMetadataSchema(db: DatabaseSync): void {
@@ -569,7 +579,8 @@ export function assertAgentDatabaseIntegrityBeforeMutation(
     (hasPendingMemoryChunkMetadataMigration(database) ||
       hasPendingSessionKeyContractSchemaMigration(database) ||
       hasRetiredAgentStateLeaseSchema(database) ||
-      hasPendingSessionProjectColumn(database));
+      hasPendingSessionProjectColumn(database) ||
+      hasPendingSessionRevisionColumn(database));
   if (userVersion === OPENCLAW_AGENT_SCHEMA_VERSION && !hasPendingCurrentVersionMigration) {
     verifyAndRepairCanonicalSqliteIndexes(database, pathname, OPENCLAW_AGENT_SCHEMA_SQL, {
       allowMissingColumns: true,
@@ -630,6 +641,9 @@ function ensureAgentSchema(
       if (previousVersion === targetVersion) {
         ensureSessionProjectColumn(db);
         ensureSessionEntryValidityProjection(db);
+        ensureSessionRevisionColumn(db);
+        ensureSessionResumeEpochTable(db);
+        ensureSessionResumeEpochSessionIdColumns(db);
         ensureSessionKeyContractSchemaInTransaction(db);
         if (hasPendingMemoryChunkMetadataMigration(db)) {
           migrateMemoryChunkMetadataSchema(db);
@@ -665,6 +679,9 @@ function ensureAgentSchema(
       migrateSessionNodesAndWindows(db, previousVersion);
       ensureSessionProjectColumn(db);
       ensureSessionEntryValidityProjection(db);
+      ensureSessionRevisionColumn(db);
+      ensureSessionResumeEpochTable(db);
+      ensureSessionResumeEpochSessionIdColumns(db);
       db.exec(OPENCLAW_AGENT_SCHEMA_SQL);
       migrateMemoryChunkMetadataSchema(db);
       if (previousVersion < targetVersion) {

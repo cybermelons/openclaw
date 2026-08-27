@@ -2914,7 +2914,10 @@ describe("session accessor seam", () => {
 
     const expectedError =
       conflict === "metadata"
-        ? "SQLite session state changed while preparing session.transcript.manual-compact"
+        ? // Phase 1 CS-3a: the primary entry-CAS compare now throws the typed
+          // `SessionConflictError` (revision-compare by default) instead of the
+          // legacy bare-string `SqliteSessionMutationConflictError`.
+          "session agent:main:main changed"
         : `SQLite transcript changed while preparing rewrite for ${sessionId}`;
     await expect(
       trimTranscriptForManualCompact(

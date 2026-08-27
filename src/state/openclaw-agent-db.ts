@@ -24,15 +24,21 @@ import {
 } from "../infra/sqlite-wal.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { normalizeAgentId } from "../routing/session-key.js";
-import type {
-  OpenClawAgentDatabase,
-  OpenClawAgentDatabaseOptions,
-  OpenClawAgentDatabaseOwnerInspection,
+import {
+  OPENCLAW_AGENT_SCHEMA_VERSION,
+  type OpenClawAgentDatabase,
+  type OpenClawAgentDatabaseOptions,
+  type OpenClawAgentDatabaseOwnerInspection,
 } from "./openclaw-agent-db-contract.js";
 import {
   claimOpenClawAgentDatabaseLease,
   releaseOpenClawAgentDatabaseLease,
 } from "./openclaw-agent-db-lease.js";
+import {
+  quarantineCorruptOpenClawAgentDatabaseFileSync,
+  restoreOpenClawAgentDatabaseFromLkgSync,
+} from "./openclaw-agent-db-lkg.js";
+import { assertOpenClawAgentDatabaseOpenTimeValidation } from "./openclaw-agent-db-open-validation.js";
 import { ensureOpenClawAgentDatabasePermissions } from "./openclaw-agent-db-permissions.js";
 import {
   isSameOpenClawAgentDatabasePath,
@@ -55,7 +61,9 @@ import {
 } from "./openclaw-agent-db.paths.js";
 import {
   clearOpenClawDatabaseQuarantine,
+  isOpenClawDatabaseCorruptMarker,
   readOpenClawDatabaseQuarantine,
+  recordOpenClawDatabaseQuarantine,
 } from "./openclaw-quarantine-store.js";
 import {
   createOpenClawDatabaseVerificationError,
@@ -182,6 +190,92 @@ function logSlowAgentDatabaseOpen(params: {
   });
 }
 
+/**
+ * CORRUPTION-FALLBACK Item 3/6a: on a terminal open failure, quarantine the
+ * corrupt file, restore from LKG if one exists (else leave the path absent
+ * for a fresh init), and write the sticky corrupt-marker into the existing
+ * quarantine ledger. The marker is sticky by construction here: it carries
+ * no `generation`, so `readOpenClawDatabaseQuarantine`'s generation-gating
+ * (which only applies to markers that DO carry one) never auto-clears it,
+ * and callers never pass `failingCheck` to the background-verifier's
+ * generation-gated quarantine path. Only `clearOpenClawAgentDatabaseOpenFailure`
+ * (operator/doctor) or a future verified-restore-clear can remove it.
+ *
+ * Only called for `isTerminalSqliteIntegrityError` (proven page/index/FK
+ * damage) — never for `SqliteSchemaVersionError`, which means this build is
+ * older than the DB, not that the DB is corrupt; that case keeps the
+ * pre-existing latch-and-throw behavior so a good newer-schema DB is never
+ * quarantined out from under an old binary.
+ *
+ * Returns `recovered: true` when the caller should re-enter the open funnel.
+ */
+function applyOpenClawAgentDatabaseCorruptionFallback(params: {
+  agentId: string;
+  env: NodeJS.ProcessEnv | undefined;
+  error: Error;
+  pathname: string;
+}): { recovered: boolean } {
+  const failingCheck = "integrity_check";
+  let quarantinedFilePath: string | undefined;
+  try {
+    quarantinedFilePath = quarantineCorruptOpenClawAgentDatabaseFileSync(params.pathname);
+  } catch (quarantineError) {
+    agentDbLog.error("failed to quarantine corrupt agent database file; leaving it in place", {
+      agentId: params.agentId,
+      path: params.pathname,
+      error: quarantineError instanceof Error ? quarantineError.message : String(quarantineError),
+    });
+    return { recovered: false };
+  }
+  let restoredFromLkgAt: Date | undefined;
+  try {
+    restoredFromLkgAt = restoreOpenClawAgentDatabaseFromLkgSync(params.pathname);
+  } catch (restoreError) {
+    agentDbLog.error("failed to restore agent database from LKG snapshot; initializing empty", {
+      agentId: params.agentId,
+      path: params.pathname,
+      error: restoreError instanceof Error ? restoreError.message : String(restoreError),
+    });
+  }
+  const recorded = recordOpenClawDatabaseQuarantine({
+    env: params.env,
+    kind: "agent",
+    path: params.pathname,
+    reason: params.error.message,
+    failingCheck,
+    ...(quarantinedFilePath ? { quarantinedFilePath } : {}),
+  });
+  if (!recorded) {
+    agentDbLog.error("failed to persist agent database corrupt-marker; marker is process-local", {
+      agentId: params.agentId,
+      path: params.pathname,
+    });
+  }
+  if (restoredFromLkgAt) {
+    agentDbLog.warn(
+      "agent database was corrupt; restored from last-known-good snapshot (lossy rewind)",
+      {
+        agentId: params.agentId,
+        path: params.pathname,
+        quarantinedFilePath,
+        restoredFromSnapshotAt: restoredFromLkgAt.toISOString(),
+        failingCheck,
+      },
+    );
+  } else {
+    agentDbLog.warn(
+      "agent database was corrupt and no LKG snapshot exists; initializing an empty database",
+      {
+        agentId: params.agentId,
+        path: params.pathname,
+        quarantinedFilePath,
+        failingCheck,
+      },
+    );
+  }
+  return { recovered: true };
+}
+
 /** Read a database's durable role and agent owner without mutating it. */
 export function inspectOpenClawAgentDatabaseOwner(
   pathname: string,
@@ -217,6 +311,17 @@ export function inspectOpenClawAgentDatabaseOwner(
 /** Open or return a cached per-agent database after schema and owner validation. */
 export function openOpenClawAgentDatabase(
   options: OpenClawAgentDatabaseOptions,
+): OpenClawAgentDatabase {
+  return openOpenClawAgentDatabaseInternal(options, { corruptionFallbackDepth: 0 });
+}
+
+// One retry only: a fresh restore-or-reinit that still fails integrity is a
+// second independent failure, not a loop to keep unwinding automatically.
+const OPENCLAW_AGENT_DB_CORRUPTION_FALLBACK_MAX_DEPTH = 1;
+
+function openOpenClawAgentDatabaseInternal(
+  options: OpenClawAgentDatabaseOptions,
+  recovery: { corruptionFallbackDepth: number },
 ): OpenClawAgentDatabase {
   const agentId = normalizeAgentId(options.agentId);
   const databaseOptions = { ...options, agentId };
@@ -278,7 +383,12 @@ export function openOpenClawAgentDatabase(
   let persistedFailure: Error | undefined;
   try {
     const quarantine = readOpenClawDatabaseQuarantine(pathname, { env: databaseOptions.env });
-    if (quarantine) {
+    // The sticky corrupt-marker (CORRUPTION-FALLBACK Item 3) already ran its
+    // restore-or-reinit before this row was written; it blocks session
+    // *resume* (consulted by the startup recovery guards), not the DB from
+    // opening again. Only the background-verifier's non-sticky quarantine
+    // (no failingCheck) fails the open outright here.
+    if (quarantine && !isOpenClawDatabaseCorruptMarker(quarantine)) {
       persistedFailure = createOpenClawDatabaseVerificationError(
         "agent",
         pathname,
@@ -308,6 +418,7 @@ export function openOpenClawAgentDatabase(
   let openedDb: DatabaseSync | undefined;
   let openedDatabase: OpenClawAgentDatabase | undefined;
   let openedWalMaintenance: SqliteWalMaintenance | undefined;
+  let fallbackRecovered = false;
   try {
     ensureOpenClawAgentDatabasePermissions(pathname, databaseOptions);
     // Free a slot before constructing the new handle: under real descriptor
@@ -330,7 +441,14 @@ export function openOpenClawAgentDatabase(
         // Integrity is not process-stable: the file can be damaged while evicted.
         // This guard is read-only (no busy waits), so every physical open pays it.
         assertAgentDatabaseIntegrityBeforeMutation(db, agentId, pathname);
-        assertCanonicalAgentMediaPersistenceVersion(db, pathname);
+        // A recognized (schema_meta role "agent") pre-head database — e.g. a
+        // just-restored pre-Phase-1 LKG snapshot — must be allowed to reach
+        // ensureOpenClawAgentSchema below before this gate is enforced for
+        // real, or a legitimate LKG restore could never migrate back to head.
+        // Foreign/unowned databases with no schema_meta still reject here.
+        assertCanonicalAgentMediaPersistenceVersion(db, pathname, {
+          allowPendingOwnedMigration: true,
+        });
         configureSqlitePreSchemaPragmas(db, {
           busyTimeoutMs: OPENCLAW_SQLITE_BUSY_TIMEOUT_MS,
         });
@@ -345,20 +463,69 @@ export function openOpenClawAgentDatabase(
         if (!isValidatedReopen) {
           ensureOpenClawAgentSchema(db, agentId, pathname);
         }
+        // CORRUPTION-FALLBACK 6c: the pragma check above proves page/b-tree/FK
+        // health, not that the app-level invariants hold. Schema is guaranteed
+        // at head by this point (ensureOpenClawAgentSchema above, or already
+        // validated on a prior open for isValidatedReopen). Re-check the media
+        // cutover gate unconditionally now that migration has run.
+        assertCanonicalAgentMediaPersistenceVersion(db, pathname);
+        assertOpenClawAgentDatabaseOpenTimeValidation(db, pathname, {
+          migrationHeadVersion: OPENCLAW_AGENT_SCHEMA_VERSION,
+        });
         return maintenance;
       } catch (err) {
         maintenance?.close();
         db.close();
-        if (
-          err instanceof Error &&
-          (err.name === "SqliteSchemaVersionError" || isTerminalSqliteIntegrityError(err))
-        ) {
+        if (err instanceof Error && err.name === "SqliteSchemaVersionError") {
+          // A newer-schema-than-this-build mismatch is a deploy/downgrade
+          // problem, not corruption: the file is fine, this binary is old.
+          // Quarantining and reinitializing it here would destroy good data.
+          // Keep the pre-existing latch-and-throw behavior for this case.
+          recordOpenClawAgentDatabaseOpenFailure(pathname, err);
+          throw err;
+        }
+        if (err instanceof Error && isTerminalSqliteIntegrityError(err)) {
+          const fallback = applyOpenClawAgentDatabaseCorruptionFallback({
+            agentId,
+            env: databaseOptions.env,
+            error: err,
+            pathname,
+          });
+          if (
+            fallback.recovered &&
+            recovery.corruptionFallbackDepth < OPENCLAW_AGENT_DB_CORRUPTION_FALLBACK_MAX_DEPTH
+          ) {
+            fallbackRecovered = true;
+            return undefined;
+          }
           recordOpenClawAgentDatabaseOpenFailure(pathname, err);
         }
         throw err;
       }
     })();
+    if (fallbackRecovered) {
+      // The corrupt file was quarantined and either restored from LKG or left
+      // absent for a fresh init. Re-enter the full open funnel so the Phase 1
+      // migration (and every other schema assert) runs against the new file
+      // from a clean state, rather than resuming this half-opened attempt.
+      // Stale "already validated" state must not survive the swap: the file
+      // on disk is now a different physical file than the one that earned
+      // that entry, so the recursive open must redo owner/schema validation
+      // (and, in particular, run ensureOpenClawAgentSchema) rather than
+      // skipping straight to open-time validation on an unmigrated file.
+      validatedAgentDatabasePaths.delete(pathname);
+      releaseOpenClawAgentDatabaseLease(leaseId, { env: options.env });
+      return openOpenClawAgentDatabaseInternal(options, {
+        corruptionFallbackDepth: recovery.corruptionFallbackDepth + 1,
+      });
+    }
     ensureOpenClawAgentDatabasePermissions(pathname, databaseOptions);
+    // The IIFE only yields `undefined` on the corruption-fallback path, which is
+    // exhausted by the `fallbackRecovered` early return above; reaching here means
+    // pragma configuration succeeded and produced live WAL maintenance.
+    if (!walMaintenance) {
+      throw new Error(`unreachable: agent database opened without WAL maintenance (${pathname})`);
+    }
     const database = { agentId, db, path: pathname, walMaintenance };
     openedDatabase = database;
     if (!isValidatedReopen) {

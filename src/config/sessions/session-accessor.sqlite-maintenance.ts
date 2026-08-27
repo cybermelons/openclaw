@@ -33,7 +33,7 @@ import {
   toDatabaseOptions,
   type ResolvedSqliteReadScope,
 } from "./session-accessor.sqlite-scope.js";
-import { parseSessionEntryJson as parseSessionEntryRow } from "./session-accessor.sqlite-status.js";
+import { readSessionEntryOrNull } from "./session-entry-parse.js";
 import { normalizeStoreSessionKey } from "./store-entry.js";
 import {
   collectSessionMaintenancePreserveKeys,
@@ -86,7 +86,7 @@ function hasStaleSqliteSessionEntryCandidate(
       .orderBy("updated_at", "asc"),
   ).rows;
   return rows.some((row) => {
-    const entry = parseSessionEntryRow(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (!entry) {
       return false;
     }
@@ -109,7 +109,7 @@ function loadSqliteSessionMaintenanceStore(
   ).rows;
   const store: Record<string, SessionEntry> = {};
   for (const row of rows) {
-    const entry = parseSessionEntryRow(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (entry) {
       store[row.session_key] = entry;
     }

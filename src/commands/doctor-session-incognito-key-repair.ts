@@ -271,6 +271,18 @@ function collectOccupiedSessionKeys(database: DatabaseSync): Set<string> {
   return keys;
 }
 
+// PHASE-3 CS-2: this function only rewrites raw session_nodes/session_windows
+// columns (parent_session_key, spawned_by, fork_source_session_key,
+// session_key). It does NOT touch entry_json here. That is not a gap: the
+// caller (applyReservedIncognitoKeyRenames, below) always follows this call
+// with rewriteSessionEntryJsonReferences, which scans every session_nodes
+// row's entry_json (no `.where` filter — every row, not just the renamed
+// key's own row) and rewrites parentSessionKey/spawnedBy/forkSource.sessionKey
+// wherever the OLD key appears, via visitSessionEntryKeyFields. So blob and
+// column stay consistent for every row in the same transaction.
+// session_windows carries no entry_json of its own (it is keyed off its
+// owning session_nodes row's blob), so there is nothing further to rewrite
+// there.
 function updateSessionKeyColumns(database: DatabaseSync, rename: ReservedKeyRename): void {
   const db = getNodeSqliteKysely<OpenClawAgentKyselyDatabase>(database);
   const update = (query: Parameters<typeof executeSqliteQuerySync>[1]) =>

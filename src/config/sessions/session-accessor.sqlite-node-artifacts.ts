@@ -9,6 +9,29 @@ import { getSessionKysely } from "./session-accessor.sqlite-scope.js";
 import { mergeSessionParticipantSource } from "./session-entry-provenance.js";
 import { normalizeStoreSessionKey } from "./store-entry.js";
 
+type ParticipantMerge = {
+  actor_source: string | null;
+  first_prompted_at: number;
+  last_prompted_at: number;
+};
+
+function buildSessionParticipantUpsert(
+  existing: Partial<ParticipantMerge> | undefined,
+  participant: ParticipantMerge,
+) {
+  return {
+    actor_source: mergeSessionParticipantSource(existing?.actor_source, participant.actor_source),
+    first_prompted_at: Math.min(
+      existing?.first_prompted_at ?? participant.first_prompted_at,
+      participant.first_prompted_at,
+    ),
+    last_prompted_at: Math.max(
+      existing?.last_prompted_at ?? participant.last_prompted_at,
+      participant.last_prompted_at,
+    ),
+  };
+}
+
 export function clearSessionCollaborationForKey(
   database: OpenClawAgentDatabase,
   sessionKey: string,
@@ -198,20 +221,9 @@ export function rehomeLegacySessionNodeArtifacts(
           .insertInto("session_participants")
           .values({ ...participant, session_key: canonicalKey })
           .onConflict((conflict) =>
-            conflict.columns(["session_key", "actor_type", "actor_id"]).doUpdateSet({
-              actor_source: mergeSessionParticipantSource(
-                existing?.actor_source,
-                participant.actor_source,
-              ),
-              first_prompted_at: Math.min(
-                existing?.first_prompted_at ?? participant.first_prompted_at,
-                participant.first_prompted_at,
-              ),
-              last_prompted_at: Math.max(
-                existing?.last_prompted_at ?? participant.last_prompted_at,
-                participant.last_prompted_at,
-              ),
-            }),
+            conflict
+              .columns(["session_key", "actor_type", "actor_id"])
+              .doUpdateSet(buildSessionParticipantUpsert(existing, participant)),
           ),
       );
     }
@@ -402,20 +414,9 @@ export function copySessionNodeArtifactsForRepair(
           .insertInto("session_participants")
           .values({ ...participant, session_key: canonicalKey })
           .onConflict((conflict) =>
-            conflict.columns(["session_key", "actor_type", "actor_id"]).doUpdateSet({
-              actor_source: mergeSessionParticipantSource(
-                existing?.actor_source,
-                participant.actor_source,
-              ),
-              first_prompted_at: Math.min(
-                existing?.first_prompted_at ?? participant.first_prompted_at,
-                participant.first_prompted_at,
-              ),
-              last_prompted_at: Math.max(
-                existing?.last_prompted_at ?? participant.last_prompted_at,
-                participant.last_prompted_at,
-              ),
-            }),
+            conflict
+              .columns(["session_key", "actor_type", "actor_id"])
+              .doUpdateSet(buildSessionParticipantUpsert(existing, participant)),
           ),
       );
     }

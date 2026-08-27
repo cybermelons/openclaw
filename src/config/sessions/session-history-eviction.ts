@@ -36,7 +36,7 @@ import {
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
-import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
+import { readSessionEntryOrNull } from "./session-entry-parse.js";
 import { normalizeStoreSessionKey } from "./store-entry.js";
 import { resolveMaintenanceConfig } from "./store-maintenance-runtime.js";
 import {
@@ -162,7 +162,7 @@ function collectRecentSessionHistoryIds(params: {
   ).rows;
   return new Set(
     rows.flatMap((row) => {
-      const entry = parseSessionEntryJson(row);
+      const entry = readSessionEntryOrNull(row.session_key, row);
       return entry &&
         isRecentSessionMaintenanceEntry({
           key: row.session_key,
@@ -200,7 +200,7 @@ function isRecentHistoricalSessionId(params: {
   if (!row) {
     return false;
   }
-  const entry = parseSessionEntryJson(row);
+  const entry = readSessionEntryOrNull(row.session_key, row);
   return Boolean(
     entry &&
     isRecentSessionMaintenanceEntry({
@@ -253,7 +253,7 @@ export function collectAdmissionProtectedSessionIds(params: {
       continue;
     }
     protectedSessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryJson(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (entry) {
       for (const sessionId of collectSessionStateIdsForEntry(entry)) {
         protectedSessionIds.add(sessionId);

@@ -11,8 +11,14 @@ import {
   hasSessionEntriesByStatusReadOnly,
   type SessionTranscriptTurnExpectedState,
 } from "../../config/sessions/session-accessor.js";
+import { resolveUnsuffixedSqliteTargetFromSessionStorePath } from "../../config/sessions/session-sqlite-target.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import {
+  isOpenClawDatabaseCorruptMarker,
+  readOpenClawDatabaseQuarantine,
+  readOpenClawSessionRowQuarantine,
+} from "../../state/openclaw-quarantine-store.js";
 import { resolveAgentSessionDirs } from "../session-dirs.js";
 
 export const mainSessionRecoveryLog = createSubsystemLogger("main-session-restart-recovery");
@@ -79,6 +85,36 @@ export function hasCurrentProcessOwner(params: {
   return params.activeSessionIds.size === 0 && params.activeSessionKeys.has(params.sessionKey);
 }
 
+/**
+ * CORRUPTION-FALLBACK.md Item 3 / PHASE-1.md §6a: a sticky corrupt marker on a
+ * session's agent database means recovery must never resume its sessions,
+ * even after the file has been quarantined and replaced by a clean restore or
+ * empty reinit. Only an operator/doctor action or a verified restore clears
+ * the marker — a later clean open must not silently clear it for us.
+ */
+export function isSessionRecoveryStorePathQuarantined(
+  storePath: string,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  const sqliteTarget = resolveUnsuffixedSqliteTargetFromSessionStorePath(storePath);
+  const quarantine = readOpenClawDatabaseQuarantine(sqliteTarget.path, { env });
+  return isOpenClawDatabaseCorruptMarker(quarantine);
+}
+
+/**
+ * PHASE-2.md §6: sibling of `isSessionRecoveryStorePathQuarantined` for the
+ * row-level ledger key space. A row-quarantined session must never be
+ * re-resumed, exactly like a DB-quarantined store — the skip guards consult
+ * both at the same point (`dbMarked(key) || rowMarked(key)`). Read-only; no
+ * caller writes a row marker until CS-4b.
+ */
+export function isSessionRecoveryRowQuarantined(
+  sessionKey: string,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return readOpenClawSessionRowQuarantine(sessionKey, { env }) !== undefined;
+}
+
 export async function resolveRestartRecoveryStorePaths(params: {
   cfg?: OpenClawConfig;
   stateDir?: string;
@@ -114,7 +150,10 @@ export async function resolveRestartRecoveryStorePaths(params: {
   }
   // Agent databases also hold auth and model-catalog state. Enter the writer
   // lane only when the session owner proves that a running row may need repair.
+  // Marker check comes first: it must gate out a quarantined database before
+  // hasSessionEntriesByStatusReadOnly would otherwise open it.
   return [...storePaths]
+    .filter((storePath) => !isSessionRecoveryStorePathQuarantined(storePath, env))
     .filter((storePath) => hasSessionEntriesByStatusReadOnly({ env, storePath }, ["running"]))
     .toSorted((a, b) => a.localeCompare(b));
 }

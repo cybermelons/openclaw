@@ -19,6 +19,7 @@ import {
   loadTranscriptEvents,
   replaceSessionEntry,
 } from "../../config/sessions/session-accessor.js";
+import { readSessionResumeEpoch } from "../../config/sessions/session-accessor.sqlite-resume-epoch-store.js";
 import { resolveAgentRestartRecoveryExecutionIdentityAdmission } from "../../gateway/agent-turn/agent-restart-recovery-context.js";
 import { callGateway } from "../../gateway/call.js";
 import type { GatewayRecoveryRuntime } from "../../gateway/server-instance-runtime.types.js";
@@ -54,6 +55,7 @@ import {
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../../state/openclaw-agent-db.js";
+import { recordOpenClawSessionRowQuarantine } from "../../state/openclaw-quarantine-store.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { deliverAgentCommandResult } from "../command/delivery.js";
@@ -973,6 +975,39 @@ describe("main-session-restart-recovery", () => {
     expect(resumeParams.lane).toBe("main");
     const store = readStore(path.join(sessionsDir, "sessions.json"));
     expect(store["agent:main:main"]?.abortedLastRun).toBe(false);
+  });
+
+  // Phase-4 CS-3 (T1) — resumeMainSession's Site A dispatch is gated on the
+  // drainTailForResume commit: the resume_epoch marker must already read
+  // epoch=1/drained by the time dispatch (callGateway) is observed, and this
+  // session has no bound CLI session, so the marker still commits with zero
+  // drain candidates. See docs/session-rearchitecture/PHASE-4.md §4 CS-3.
+  it("commits the resume_epoch marker before dispatching the resumed turn (zero candidates)", async () => {
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = tmpDir;
+    try {
+      const sessionsDir = await makeSessionsDir();
+      await writeStore(sessionsDir, mainSessionStore());
+      await writeCompletedToolTranscript(sessionsDir);
+
+      let markerAtDispatchTime: ReturnType<typeof readSessionResumeEpoch> | undefined;
+      vi.mocked(callGateway).mockImplementationOnce(async () => {
+        const database = openOpenClawAgentDatabase({ agentId: "main", env: process.env });
+        markerAtDispatchTime = readSessionResumeEpoch(database, "agent:main:main");
+        return { runId: "run-resumed" };
+      });
+
+      await expectRecovery({ recovered: 1, failed: 0, skipped: 0 });
+
+      expect(callGateway).toHaveBeenCalledOnce();
+      expect(markerAtDispatchTime).toMatchObject({ epoch: 1, state: "drained" });
+    } finally {
+      if (previousStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      }
+    }
   });
 
   it("resumes when durable commentary is mirrored after the restart recovery mark", async () => {
@@ -2637,6 +2672,57 @@ describe("main-session-restart-recovery", () => {
     store = readStore(path.join(sessionsDir, "sessions.json"));
     expect(store["agent:main:main"]?.abortedLastRun).toBe(false);
     expect(store["agent:main:already-marked"]?.abortedLastRun).toBe(false);
+  });
+
+  it("never re-resumes a session with only a row-level quarantine marker across a full startup (PHASE-2.md §6)", async () => {
+    // No DB-level marker exists for this store — only a row-level marker,
+    // keyed by sessionKey, on the one session that must stay quarantined.
+    // Both boot-shaped skip guards must honor it: marking must not mark it
+    // interrupted-for-recovery, and recovery must not dispatch a resume.
+    const sessionsDir = await makeSessionsDir();
+    const env = { ...process.env, OPENCLAW_STATE_DIR: tmpDir };
+    await writeStore(sessionsDir, {
+      "agent:main:quarantined-row": {
+        ...runningSessionEntry("quarantined-row-session"),
+      },
+      "agent:main:healthy-sibling": {
+        ...runningSessionEntry("healthy-sibling-session"),
+      },
+    });
+    await writeTranscript(sessionsDir, "healthy-sibling-session", [
+      { role: "user", content: "run the tool" },
+      { role: "toolResult", content: "done" },
+    ]);
+    expect(
+      recordOpenClawSessionRowQuarantine({
+        env,
+        sessionKey: "agent:main:quarantined-row",
+        reason: "SessionRowCorruptError",
+      }),
+    ).toBe(true);
+
+    const marked = await markStartupOrphanedMainSessionsForRecovery({ stateDir: tmpDir });
+
+    expect(marked).toEqual({ marked: 1, skipped: 0 });
+    let store = readStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:quarantined-row"]?.abortedLastRun).toBeUndefined();
+    expect(store["agent:main:healthy-sibling"]?.abortedLastRun).toBe(true);
+
+    const recovered = await recoverRestartAbortedMainSessions({ stateDir: tmpDir });
+
+    expect(recovered).toEqual({ recovered: 1, failed: 0, skipped: 0 });
+    expect(callGateway).toHaveBeenCalledTimes(1);
+    store = readStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:quarantined-row"]?.abortedLastRun).toBeUndefined();
+    expect(store["agent:main:healthy-sibling"]?.abortedLastRun).toBe(false);
+
+    // A second boot-shaped pass proves the marker is sticky, not just
+    // unmarked-because-not-yet-scanned. (The healthy sibling is a fresh
+    // "running" candidate again after being resumed, so it may be marked a
+    // second time — the assertion that matters is the quarantined row.)
+    await markStartupOrphanedMainSessionsForRecovery({ stateDir: tmpDir });
+    store = readStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:quarantined-row"]?.abortedLastRun).toBeUndefined();
   });
 
   it("does not create empty agent databases while scanning startup recovery", async () => {

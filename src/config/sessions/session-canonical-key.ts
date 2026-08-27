@@ -115,6 +115,15 @@ export function canonicalSessionKeyMigrationRequiredError(
   return new SessionCanonicalKeyMigrationRequiredError(detail);
 }
 
+export function isCanonicalSessionKeyMigrationRequiredError(
+  error: unknown,
+): error is SessionCanonicalKeyMigrationRequiredError {
+  return error instanceof SessionCanonicalKeyMigrationRequiredError;
+}
+
+/**
+ * Consistency audit. Compares write-only index vs blob truth. NOT a read path. Powers doctor canonical-key repair; do not delete (Phase 3 CS-6).
+ */
 export function assertCanonicalSqliteSessionKeysCurrent(
   database: { agentId: string; db: DatabaseSync },
   mainKey?: string,

@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS session_nodes (
   archived_at INTEGER,
   last_read_at INTEGER,
   last_interaction_at INTEGER,
-  last_activity_at INTEGER
+  last_activity_at INTEGER,
+  revision INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_agent_session_nodes_updated_at
@@ -90,6 +91,31 @@ CREATE TABLE IF NOT EXISTS session_key_contract (
 ) STRICT;
 
 INSERT OR IGNORE INTO session_key_contract (id, main_key, updated_at) VALUES (1, 'main', 0);
+
+-- Phase-4 resumption-ordering marker (PHASE-4.md §3a). Dedicated table, not a
+-- column on session_nodes, so drain + marker commit atomically without
+-- contending with the Phase-3 revision/CAS write path. state is a stored
+-- enum, never inferred from row presence/absence. Written by CS-2; nothing
+-- reads it until CS-3/CS-4.
+CREATE TABLE IF NOT EXISTS session_resume_epoch (
+  session_key TEXT NOT NULL PRIMARY KEY,
+  epoch INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('drain_pending', 'drained')),
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_resume_epoch_state
+  ON session_resume_epoch(session_key)
+  WHERE state = 'drain_pending';
+
+-- New sessions get the epoch=0/drained marker at creation (PHASE-4.md §3a);
+-- a missing row is an invariant violation, not a pending signal.
+CREATE TRIGGER IF NOT EXISTS session_resume_epoch_after_session_nodes_insert
+AFTER INSERT ON session_nodes
+BEGIN
+  INSERT OR IGNORE INTO session_resume_epoch (session_key, epoch, state, updated_at)
+  VALUES (NEW.session_key, 0, 'drained', NEW.updated_at);
+END;
 
 CREATE TRIGGER IF NOT EXISTS session_nodes_entry_valid_after_insert
 AFTER INSERT ON session_nodes

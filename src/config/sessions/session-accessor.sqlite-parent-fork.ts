@@ -30,20 +30,7 @@ type SqliteTranscriptParentTokenEstimate = {
   tokens: number;
 };
 
-const FALLBACK_PARENT_FORK_MAX_TOKENS = 1_000_000;
-
-function resolveParentForkMaxTokens(): number {
-  const raw = process.env.OPENCLAW_PARENT_FORK_MAX_TOKENS;
-  if (typeof raw === "string" && raw.trim() !== "") {
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-  return FALLBACK_PARENT_FORK_MAX_TOKENS;
-}
-
-const DEFAULT_PARENT_FORK_MAX_TOKENS = resolveParentForkMaxTokens();
+const DEFAULT_PARENT_FORK_MAX_TOKENS = 100_000;
 
 function formatParentForkTooLargeMessage(params: {
   parentTokens: number;

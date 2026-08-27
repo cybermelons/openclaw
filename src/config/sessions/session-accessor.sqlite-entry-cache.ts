@@ -10,7 +10,8 @@ import {
   projectSqliteSessionParticipantsBatch,
 } from "./session-accessor.sqlite-participant-projection.js";
 import { getSessionKysely } from "./session-accessor.sqlite-scope.js";
-import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
+import { projectSessionEntry } from "./session-entry-parse.js";
+import { isSessionRowCorruptError } from "./session-row-corrupt-error.js";
 import type { SessionEntry } from "./types.js";
 
 type SessionEntryCacheDatabase = Pick<OpenClawAgentDatabase, "agentId" | "db">;
@@ -23,12 +24,14 @@ export type SessionEntryCacheSnapshot = {
 
 type SqliteSessionEntryCache = SessionEntryCacheSnapshot & {
   listProjections: Map<string, SessionEntry>;
+  revisionByKey: Map<string, number>;
   updatedAtByKey: Map<string, number>;
   validityToken: SqliteSessionEntryCacheValidityToken;
 };
 
 type LoadedSessionEntrySnapshot = SessionEntryCacheSnapshot & {
   listProjections: Map<string, SessionEntry>;
+  revisionByKey: Map<string, number>;
   updatedAtByKey: Map<string, number>;
 };
 
@@ -177,6 +180,7 @@ function loadSessionEntrySnapshot(database: SessionEntryCacheDatabase): LoadedSe
             "session_key",
             "entry_json",
             "updated_at",
+            "revision",
             "owner_actor_type",
             "owner_actor_id",
             "owner_assigned_by_type",
@@ -189,16 +193,18 @@ function loadSessionEntrySnapshot(database: SessionEntryCacheDatabase): LoadedSe
         database.db,
         db
           .selectFrom("session_nodes")
-          .select(["session_key", "entry_json", "updated_at"])
+          .select(["session_key", "entry_json", "updated_at", "revision"])
           .orderBy("session_key"),
       ).rows;
   const parsedEntries = new Map<string, SessionEntry>();
   for (const row of rows) {
-    const entry = parseSessionEntryJson(row);
-    if (!entry) {
-      continue;
+    try {
+      parsedEntries.set(row.session_key, projectSessionEntry(row.session_key, row));
+    } catch (error) {
+      if (!isSessionRowCorruptError(error)) {
+        throw error;
+      }
     }
-    parsedEntries.set(row.session_key, entry);
   }
   const entries = projectSqliteSessionParticipantsBatch(database.db, parsedEntries);
   const listProjections = new Map<string, SessionEntry>();
@@ -207,6 +213,7 @@ function loadSessionEntrySnapshot(database: SessionEntryCacheDatabase): LoadedSe
     keys: rows.map((row) => row.session_key),
     listEntries: createLazyListProjections(entries, listProjections),
     listProjections,
+    revisionByKey: new Map(rows.map((row) => [row.session_key, row.revision])),
     updatedAtByKey: new Map(rows.map((row) => [row.session_key, row.updated_at])),
   };
 }
@@ -219,11 +226,19 @@ function incrementallyRevalidateSessionEntrySnapshot(
   const db = getSessionKysely(database.db);
   const versions = executeSqliteQuerySync(
     database.db,
-    db.selectFrom("session_nodes").select(["session_key", "updated_at"]),
+    db.selectFrom("session_nodes").select(["session_key", "updated_at", "revision"]),
   ).rows;
   const updatedAtByKey = new Map(versions.map((row) => [row.session_key, row.updated_at]));
+  const revisionByKey = new Map(versions.map((row) => [row.session_key, row.revision]));
+  // updated_at is entry-controlled and can repeat across writes; the Phase-1 revision
+  // column is bumped on every session_nodes write, so it catches a same-millisecond
+  // rewrite updated_at alone would miss. Either signal changing marks the row stale.
   const changedKeys = versions
-    .filter((row) => cached.updatedAtByKey.get(row.session_key) !== row.updated_at)
+    .filter(
+      (row) =>
+        cached.updatedAtByKey.get(row.session_key) !== row.updated_at ||
+        cached.revisionByKey.get(row.session_key) !== row.revision,
+    )
     .map((row) => row.session_key);
   const removedKeys = cached.keys.filter((sessionKey) => !updatedAtByKey.has(sessionKey));
 
@@ -270,12 +285,16 @@ function incrementallyRevalidateSessionEntrySnapshot(
             .where("session_key", "in", changedKeys),
         ).rows;
     for (const row of changedRows) {
-      const entry = parseSessionEntryJson(row);
-      if (entry) {
+      try {
+        const entry = projectSessionEntry(row.session_key, row);
         entries.set(
           row.session_key,
           projectSqliteSessionParticipants(database.db, row.session_key, entry),
         );
+      } catch (error) {
+        if (!isSessionRowCorruptError(error)) {
+          throw error;
+        }
       }
     }
   }
@@ -284,6 +303,7 @@ function incrementallyRevalidateSessionEntrySnapshot(
     keys: versions.map((row) => row.session_key).toSorted(),
     listEntries: createLazyListProjections(entries, listProjections),
     listProjections,
+    revisionByKey,
     updatedAtByKey,
     validityToken,
   };
@@ -382,13 +402,32 @@ function publishSqliteSessionEntryCacheUpsert(
           .limit(1),
       ).rows[0]
     : undefined;
-  const parsedEntry = parseSessionEntryJson({
-    current_session_id: row.current_session_id,
-    entry_json: row.entry_json,
-    updated_at: row.updated_at,
-    ...ownerRow,
-  });
-  if (!parsedEntry) {
+  // The write path bumps `revision` server-side (eb("session_nodes.revision", "+", 1)),
+  // so the pre-write `sessionNode` the caller holds cannot supply its post-write value;
+  // read it back once here to key the write-through cache entry.
+  const revisionRow = executeSqliteQuerySync(
+    database.db,
+    getSessionKysely(database.db)
+      .selectFrom("session_nodes")
+      .select("revision")
+      .where("session_key", "=", row.session_key)
+      .limit(1),
+  ).rows[0];
+  let parsedEntry: SessionEntry;
+  try {
+    parsedEntry = projectSessionEntry(row.session_key, {
+      current_session_id: row.current_session_id,
+      entry_json: row.entry_json,
+      updated_at: row.updated_at,
+      ...ownerRow,
+    });
+  } catch (error) {
+    if (!isSessionRowCorruptError(error)) {
+      throw error;
+    }
+    // Write-adjacent read of a row just written by this same operation; a corrupt
+    // read here should be near-impossible. Fail open to full invalidation rather
+    // than letting a post-write cache-publish throw destabilize the write caller.
     invalidateTrackedCache(database);
     return;
   }
@@ -411,6 +450,12 @@ function publishSqliteSessionEntryCacheUpsert(
     const updatedAtByKey = new Map(cached.updatedAtByKey);
     const knownKey = updatedAtByKey.has(row.session_key);
     updatedAtByKey.set(row.session_key, row.updated_at);
+    const revisionByKey = new Map(cached.revisionByKey);
+    if (revisionRow) {
+      revisionByKey.set(row.session_key, revisionRow.revision);
+    } else {
+      revisionByKey.delete(row.session_key);
+    }
     // Advance only across the bracketed row write. A raw write before/after this bracket leaves
     // a generation gap, while the retained data_version still exposes external commits.
     sessionEntryCaches.set(database.db, {
@@ -418,6 +463,7 @@ function publishSqliteSessionEntryCacheUpsert(
       keys: knownKey ? cached.keys : [...cached.keys, row.session_key].toSorted(),
       listEntries: createLazyListProjections(entries, listProjections),
       listProjections,
+      revisionByKey,
       updatedAtByKey,
       validityToken: generationIsContinuous
         ? {

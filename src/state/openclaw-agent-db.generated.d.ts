@@ -264,6 +264,7 @@ export interface SessionNodes {
   parent_session_key: string | null;
   pinned_at: number | null;
   project_id: string | null;
+  revision: Generated<number>;
   session_key: string;
   spawned_by: string | null;
   status: string | null;
@@ -285,6 +286,13 @@ export interface SessionProgressCards {
   revision: number;
   session_key: string;
   steps_json: string | null;
+  updated_at: number;
+}
+
+export interface SessionResumeEpoch {
+  epoch: number;
+  session_key: string;
+  state: string;
   updated_at: number;
 }
 
@@ -502,6 +510,7 @@ export interface DB {
   session_nodes: SessionNodes;
   session_participants: SessionParticipants;
   session_progress_cards: SessionProgressCards;
+  session_resume_epoch: SessionResumeEpoch;
   session_suggestions: SessionSuggestions;
   session_transcript_active_events: SessionTranscriptActiveEvents;
   session_transcript_archives: SessionTranscriptArchives;

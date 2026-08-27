@@ -1,5 +1,8 @@
 import type { MsgContext } from "../../auto-reply/templating.js";
-import { executeSqliteQueryTakeFirstSync } from "../../infra/kysely-sync.js";
+import {
+  executeSqliteQuerySync,
+  executeSqliteQueryTakeFirstSync,
+} from "../../infra/kysely-sync.js";
 import type { ChannelRouteRef } from "../../plugin-sdk/channel-route.js";
 import { withOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
 import {
@@ -72,8 +75,10 @@ import {
   canonicalSessionKeyMigrationRequiredError,
 } from "./session-canonical-key.js";
 import { preserveSqliteSameKeySessionRolloverLineage } from "./session-entry-lineage.js";
+import { projectSessionEntry } from "./session-entry-parse.js";
 import { buildSessionCreationStamp } from "./session-entry-provenance.js";
 import { kickSessionHistoryDiskBudgetMaintenance } from "./session-history-eviction.js";
+import { isSessionRowCorruptError } from "./session-row-corrupt-error.js";
 import { resolveSessionStorePathForScope } from "./session-store-path.js";
 import { resolveDeliveryProvenCanonicalSessionKey } from "./store-entry.js";
 import {
@@ -299,6 +304,13 @@ export function countSessionEntryRowsReadOnly(scope: SessionEntryListScope = {})
 /**
  * Proves whether a durable store has a row in one of the requested lifecycle states.
  * Unknown existing schemas stay eligible so the writable owner can surface or repair them.
+ *
+ * §8c: this gates restart-recovery (a resume-class side effect), so the boolean must
+ * reflect the BLOB `status`, not the projected `status` COLUMN. The two can diverge,
+ * so the column can only pre-narrow to rows that have SOME non-null status at all
+ * (`status IS NOT NULL`) — it must not filter to `status IN (selectedStatuses)`,
+ * because a row whose column drifted away from a requested status while its blob
+ * still holds that status would then be excluded before its blob is ever read.
  */
 export function hasSessionEntriesByStatusReadOnly(
   scope: Partial<Omit<SessionAccessScope, "sessionKey">>,
@@ -308,19 +320,32 @@ export function hasSessionEntriesByStatusReadOnly(
   if (selectedStatuses.length === 0) {
     return false;
   }
+  const selectedStatusSet = new Set<string>(selectedStatuses);
   const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
   const result = withOpenClawAgentDatabaseReadOnly((database) => {
     const db = getSessionKysely(database.db);
-    return Boolean(
-      executeSqliteQueryTakeFirstSync(
-        database.db,
-        db
-          .selectFrom("session_nodes")
-          .select("session_key")
-          .where("status", "in", selectedStatuses)
-          .limit(1),
-      ),
-    );
+    const rows = executeSqliteQuerySync(
+      database.db,
+      db
+        .selectFrom("session_nodes")
+        .select(["session_key", "entry_json", "current_session_id", "updated_at"])
+        .where("status", "is not", null),
+    ).rows;
+    for (const row of rows) {
+      let blobStatus: string | undefined;
+      try {
+        blobStatus = projectSessionEntry(row.session_key, row).status;
+      } catch (error) {
+        if (isSessionRowCorruptError(error)) {
+          continue;
+        }
+        throw error;
+      }
+      if (blobStatus !== undefined && selectedStatusSet.has(blobStatus)) {
+        return true;
+      }
+    }
+    return false;
   }, toDatabaseOptions(resolved));
   return result.found ? result.value : result.reason !== "database-missing";
 }
@@ -404,8 +429,8 @@ export function listSessionTranscriptInstances(
 export function readSessionUpdatedAtCore(scope: SessionAccessScope): number | undefined {
   const resolved = resolveSqliteScope(scope);
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
-  const row = readSessionEntryRow(database, resolved.sessionKey)?.row;
-  return row ? coerceSqliteNumber(row.updated_at) : undefined;
+  const entry = readSessionEntryRow(database, resolved.sessionKey)?.entry;
+  return entry?.updatedAt;
 }
 
 /** Applies a partial entry update to the additive SQLite session store. */

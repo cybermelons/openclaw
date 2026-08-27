@@ -30,12 +30,16 @@ export type ProjectedLifecycleMutation = {
   deletePlans: SessionStateDeletePlan[];
   removals: Array<{
     expectedEntry: SessionEntry;
+    /** `session_nodes.revision` at projection time; -1 when unavailable (PHASE-1.md §3). */
+    expectedRevision: number;
     removal: SessionEntryLifecycleRemoval;
     sessionKey: string;
   }>;
   upsertedEntries: Array<{
     entry: SessionEntry;
     expectedEntry: SessionEntry | undefined;
+    /** `session_nodes.revision` at projection time; -1 when unavailable (PHASE-1.md §3). */
+    expectedRevision: number;
     resetBoundaryPlan?: SessionResetBoundaryPlan;
     sessionKey: string;
   }>;

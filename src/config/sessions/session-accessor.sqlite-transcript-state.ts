@@ -8,18 +8,14 @@ import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { publishSessionEntryCacheInvalidation } from "./session-accessor.sqlite-entry-cache.js";
 import { coerceSqliteNumber } from "./session-accessor.sqlite-normalize.js";
 import { getSessionKysely, type ResolvedTranscriptScope } from "./session-accessor.sqlite-scope.js";
-import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
 import {
   assertCanonicalSqliteSessionKeysCurrent,
   assertCanonicalSessionKeyWriteMatchesDatabase,
   canonicalSessionKeyMigrationRequiredError,
 } from "./session-canonical-key.js";
+import { readCanonicalSqliteSessionEntryRow } from "./session-entry-parse.js";
 import { deleteSessionTranscriptIndexInTransaction } from "./session-transcript-index.js";
-import {
-  foldedSessionKeyAliasCandidates,
-  normalizeStoreSessionKey,
-  resolveDeliveryProvenCanonicalSessionKey,
-} from "./store-entry.js";
+import { foldedSessionKeyAliasCandidates, normalizeStoreSessionKey } from "./store-entry.js";
 
 function createTranscriptGeneration(): string {
   return randomUUID().replaceAll("-", "");
@@ -110,34 +106,10 @@ export function ensureTranscriptSessionRoot(
         .where("session_key", "in", lookupKeys),
     ).rows;
     for (const candidate of candidates) {
-      const entry = parseSessionEntryJson(candidate);
-      if (!entry) {
-        const retainedWindow =
-          candidate.entry_json === "{}"
-            ? executeSqliteQueryTakeFirstSync(
-                database.db,
-                db
-                  .selectFrom("session_windows")
-                  .select("session_id")
-                  .where("session_id", "=", candidate.current_session_id)
-                  .where("session_key", "=", candidate.session_key),
-              )
-            : undefined;
-        if (!retainedWindow) {
-          throw canonicalSessionKeyMigrationRequiredError(
-            `invalid persisted session row requires repair for ${candidate.session_key}`,
-          );
-        }
-        continue;
-      }
-      if (
-        resolveDeliveryProvenCanonicalSessionKey(candidate.session_key, entry) !==
-        candidate.session_key
-      ) {
-        throw canonicalSessionKeyMigrationRequiredError(
-          `non-canonical persisted row resolves to session key ${candidate.session_key}`,
-        );
-      }
+      // readCanonicalSqliteSessionEntryRow performs the parse, retained-window
+      // special case, and canonical-key check in one place (Fable rule D:
+      // single logical resolution per row, no manual reimplementation here).
+      readCanonicalSqliteSessionEntryRow(database, candidate);
     }
     const existing = candidates.find((candidate) => candidate.session_key === scope.sessionKey);
     if (existing && existing.entry_valid !== 1) {
@@ -169,6 +141,7 @@ export function ensureTranscriptSessionRoot(
         entry_json: "{}",
         entry_valid: -1,
         updated_at: updatedAt,
+        revision: 1,
       })
       .onConflict((conflict) => conflict.column("session_key").doNothing()),
   );
@@ -177,7 +150,7 @@ export function ensureTranscriptSessionRoot(
       database.db,
       db
         .updateTable("session_nodes")
-        .set({ entry_valid: -1 })
+        .set((eb) => ({ entry_valid: -1, revision: eb("session_nodes.revision", "+", 1) }))
         .where("session_key", "=", scope.sessionKey),
     );
     publishSessionEntryCacheInvalidation(database);

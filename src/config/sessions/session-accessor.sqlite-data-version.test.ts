@@ -37,7 +37,7 @@ vi.mock("../../infra/kysely-sync.js", async (importOriginal) => {
       const result = actual.executeSqliteQuerySync(database, query);
       if (
         compiled.sql.replace(/\s+/gu, " ").trim() ===
-        'select "session_key", "updated_at" from "session_nodes"'
+        'select "session_key", "updated_at", "revision" from "session_nodes"'
       ) {
         sessionNodeVersionScans.rowCounts.push(result.rows.length);
         const onScan = sessionNodeVersionScans.onScan;
@@ -49,13 +49,13 @@ vi.mock("../../infra/kysely-sync.js", async (importOriginal) => {
   };
 });
 
-vi.mock("./session-accessor.sqlite-status.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./session-accessor.sqlite-status.js")>();
+vi.mock("./session-entry-parse.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./session-entry-parse.js")>();
   return {
     ...actual,
-    parseSessionEntryJson: (row: Parameters<typeof actual.parseSessionEntryJson>[0]) => {
+    projectSessionEntry: (...args: Parameters<typeof actual.projectSessionEntry>) => {
       parseSessionEntryCalls();
-      const entry = actual.parseSessionEntryJson(row);
+      const entry = actual.projectSessionEntry(...args);
       if (entry?.label?.startsWith("projection-probe")) {
         Object.defineProperty(entry, "__projectionProbe", {
           configurable: true,
@@ -727,7 +727,12 @@ describe("SQLite session entry cache", () => {
     const view = openSessionEntryReadView(scope);
     const first = view.get(scope.sessionKey);
     expect(view.get(scope.sessionKey)).toStrictEqual(first);
-    expect(view.entries()[0]?.entry).toStrictEqual(first);
+    // `get` resolves through the participant-full, no-participants-key-when-empty
+    // pipeline (readCanonicalSqliteSessionEntryRow), while `entries` resolves
+    // through the cache's `projectSessionEntry` pipeline, which always carries a
+    // required `participants`/`participantCount` pair (Phase 2 CS-4, §4). The two
+    // paths now intentionally diverge on that field; compare everything else.
+    expect(view.entries()[0]?.entry).toMatchObject({ ...first, participants: [] });
   });
 
   it("honors latest reads after an untracked own-connection write", async () => {

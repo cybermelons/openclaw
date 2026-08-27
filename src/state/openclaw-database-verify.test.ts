@@ -24,6 +24,7 @@ import {
 } from "./openclaw-database-verify.worker.js";
 import {
   clearOpenClawDatabaseQuarantine,
+  isOpenClawDatabaseCorruptMarker,
   readOpenClawDatabaseQuarantine,
   recordOpenClawDatabaseQuarantine,
 } from "./openclaw-quarantine-store.js";
@@ -216,7 +217,21 @@ describe("OpenClaw database integrity verifier", () => {
         },
       );
 
-      expect(reader.stderr).toBe("");
+      // Node's own experimental-feature warning for node:sqlite is emitted by
+      // the runtime, not by anything this test or CS-4 controls, and its
+      // presence is unrelated to what this assertion is guarding (no other
+      // stderr output from the reader child). Filter it out before asserting
+      // the reader produced no *application* stderr output.
+      const readerStderr = reader.stderr
+        .split("\n")
+        .filter(
+          (line) =>
+            !line.includes("ExperimentalWarning: SQLite is an experimental feature") &&
+            !line.includes("--trace-warnings"),
+        )
+        .join("\n")
+        .trim();
+      expect(readerStderr).toBe("");
       expect(reader.status).toBe(0);
       expect(fs.statSync(`${agent.path}-wal`).ino).toBe(walBefore.ino);
       expect(fs.statSync(`${agent.path}-shm`).ino).toBe(shmBefore.ino);
@@ -259,6 +274,15 @@ describe("OpenClaw database integrity verifier", () => {
       reason: expect.stringMatching(/missing from index unsafe_index_records_value/iu),
     });
 
+    // The background verifier's quarantine is a distinct, generation-gated
+    // record from the sticky corrupt-marker (CORRUPTION-FALLBACK Item 3): it
+    // still latches opens via the pre-existing open-failure cache rather than
+    // going through the db-open catch's own integrity check, so this open
+    // still throws even though a *fresh* isTerminalSqliteIntegrityError from
+    // db-open itself would recover. Confirm the latch, then confirm clearing
+    // the latch allows a live re-open, which — since the file is still
+    // corrupt on disk — now hits db-open's own corruption-fallback and
+    // recovers rather than throwing, recording a sticky marker for the path.
     expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
       expect.objectContaining({ name: "SqliteIntegrityError" }),
     );
@@ -272,9 +296,10 @@ describe("OpenClaw database integrity verifier", () => {
       }),
     );
     clearOpenClawAgentDatabaseOpenFailure(agentPath, { env });
-    expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
-      expect.objectContaining({ name: "SqliteIntegrityError" }),
-    );
+    const recovered = openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    expect(recovered.path).toBe(agentPath);
+    const stickyMarker = readOpenClawDatabaseQuarantine(agentPath, { env });
+    expect(isOpenClawDatabaseCorruptMarker(stickyMarker)).toBe(true);
   });
 
   it("does not quarantine a healthy database that replaced the verified file", async () => {
@@ -551,7 +576,11 @@ describe("OpenClaw database integrity verifier", () => {
     try {
       expect(raw.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" });
       expect(readSqliteNumberPragma(raw, "synchronous")).toBe(2);
-      expect(readSqliteNumberPragma(raw, "user_version")).toBe(2);
+      // Bumped by CORRUPTION-FALLBACK 6a's sticky-marker columns (failing_check,
+      // quarantined_file_path) to v3, then by PHASE-2.md §6's row-level
+      // sessionKey key-space (quarantined_session_rows table) to v4; see
+      // openclaw-quarantine-store.ts.
+      expect(readSqliteNumberPragma(raw, "user_version")).toBe(4);
     } finally {
       raw.close();
     }
@@ -643,7 +672,10 @@ describe("OpenClaw database integrity verifier", () => {
 
     const migrated = new DatabaseSync(storePath, { readOnly: true });
     try {
-      expect(readSqliteNumberPragma(migrated, "user_version")).toBe(2);
+      // Bumped by CORRUPTION-FALLBACK 6a's sticky-marker columns and PHASE-2.md
+      // §6's row-level sessionKey key-space; a v1 row migrates straight
+      // through to the current schema v4 on next write.
+      expect(readSqliteNumberPragma(migrated, "user_version")).toBe(4);
       expect(
         migrated
           .prepare("SELECT reason, verified_generation FROM quarantined_databases WHERE path = ?")

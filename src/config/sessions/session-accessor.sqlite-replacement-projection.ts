@@ -30,6 +30,8 @@ import {
 } from "./session-accessor.sqlite-scope.js";
 import { readSessionEntriesByStatus } from "./session-accessor.sqlite-status.js";
 import type { SessionEntryReplacement } from "./session-accessor.types.js";
+import { sessionCasValueCompareEnabled } from "./session-cas-mode.js";
+import { SessionConflictError } from "./session-conflict-error.js";
 import type { SessionEntry } from "./types.js";
 
 export type SessionEntryCanonicalReplacement = SessionEntryReplacement & {
@@ -87,6 +89,17 @@ async function applySqliteSessionEntryReplacementProjection<T, TReplacement>(
       : selectedKeys;
     const expectedEntryJson = new Map(
       entries.map(({ sessionKey, entry }) => [sessionKey, JSON.stringify(entry)]),
+    );
+    // `entries` is sourced from readSessionEntriesByStatus/readExactSessionEntryRow/
+    // readSessionEntryStore, none of which uniformly carry `revision` on their
+    // shared, widely-consumed return type (SessionEntrySummary). Capture the
+    // expected revision with one targeted per-key lookup instead of widening
+    // that shared type (PHASE-1.md §3, minimal-surface).
+    const expectedRevision = new Map(
+      entries.map(({ sessionKey }) => [
+        sessionKey,
+        readExactSessionEntryRow(database, sessionKey)?.row.revision ?? -1,
+      ]),
     );
     const operation = await params.update(entries);
     const replacements = normalize(operation.replacements);
@@ -152,9 +165,22 @@ async function applySqliteSessionEntryReplacementProjection<T, TReplacement>(
       (transactionDb) => {
         const transactionEntries = new Map<string, SessionEntry>();
         for (const sessionKey of validationKeys) {
-          const transactionEntry = readExactSessionEntryRow(transactionDb, sessionKey)?.entry;
-          if (JSON.stringify(transactionEntry) !== expectedEntryJson.get(sessionKey)) {
-            throw new Error(`SQLite session entry changed before replacement for ${sessionKey}`);
+          const currentRow = readExactSessionEntryRow(transactionDb, sessionKey);
+          const transactionEntry = currentRow?.entry;
+          const actualRevision = currentRow?.row.revision ?? -1;
+          const expected = expectedRevision.get(sessionKey) ?? -1;
+          // Default (flag off): integer revision compare. Flag on: legacy
+          // value-compare via raw JSON equality (PHASE-1.md §7).
+          const replacementConflicted = sessionCasValueCompareEnabled()
+            ? JSON.stringify(transactionEntry) !== expectedEntryJson.get(sessionKey)
+            : actualRevision !== expected;
+          if (replacementConflicted) {
+            throw new SessionConflictError({
+              actualRevision,
+              expectedRevision: expected,
+              key: sessionKey,
+              message: `SQLite session entry changed before replacement for ${sessionKey}`,
+            });
           }
           if (transactionEntry) {
             transactionEntries.set(sessionKey, transactionEntry);

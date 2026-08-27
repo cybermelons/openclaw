@@ -8,6 +8,7 @@ import {
   runOpenClawAgentWriteTransaction,
   type OpenClawAgentDatabase,
 } from "../../state/openclaw-agent-db.js";
+import { recordOpenClawSessionRowQuarantine } from "../../state/openclaw-quarantine-store.js";
 import { listSqliteSessionEntriesWithCanonicalOwnerEvidence } from "./session-accessor.sqlite-canonical-inventory.js";
 import type { SessionEntrySummary } from "./session-accessor.sqlite-contract.js";
 import { publishSessionEntryCacheInvalidation } from "./session-accessor.sqlite-entry-cache.js";
@@ -22,12 +23,13 @@ import {
   resolveSqliteStoreScope,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
+  upsertSessionConversationLink,
 } from "./session-accessor.sqlite-scope.js";
 import { bindSessionWindowEntryProjection } from "./session-accessor.sqlite-session-row.js";
-import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
 import { ensureTranscriptGenerationInTransaction } from "./session-accessor.sqlite-transcript-state.js";
 import type { SessionEntryListScope } from "./session-accessor.types.js";
 import { canonicalSessionKeyMigrationRequiredError } from "./session-canonical-key.js";
+import { parseSessionEntryBlob } from "./session-entry-parse.js";
 import {
   deleteSessionTranscriptIndexInTransaction,
   reconcileSessionTranscriptIndexInTransaction,
@@ -84,16 +86,17 @@ export function readExactSessionEntryRowForCanonicalRepair(
       return undefined;
     }
   }
-  const parsedEntry = parseSessionEntryJson(row);
-  if (!parsedEntry && !options.allowMalformedRowRepair) {
+  const result = parseSessionEntryBlob(sessionKey, row);
+  if (!result.ok && !options.allowMalformedRowRepair) {
+    recordOpenClawSessionRowQuarantine({ sessionKey, reason: result.corrupt.reason });
     throw canonicalSessionKeyMigrationRequiredError(
       `invalid persisted session row requires repair for ${sessionKey}`,
     );
   }
   return {
-    entry:
-      parsedEntry ??
-      ({ sessionId: row.current_session_id, updatedAt: row.updated_at } satisfies SessionEntry),
+    entry: result.ok
+      ? result.entry
+      : ({ sessionId: row.current_session_id, updatedAt: row.updated_at } satisfies SessionEntry),
     legacyKeys: [],
     row,
   };
@@ -457,15 +460,10 @@ function copySqliteSessionOwnedStateForRepair(params: {
   for (const link of sessionLinks) {
     executeSqliteQuerySync(
       params.destination.db,
-      destinationDb
-        .insertInto("session_conversations")
-        .values(link)
-        .onConflict((conflict) =>
-          conflict.columns(["session_id", "conversation_id", "role"]).doUpdateSet({
-            first_seen_at: link.first_seen_at,
-            last_seen_at: link.last_seen_at,
-          }),
-        ),
+      upsertSessionConversationLink(destinationDb, link, {
+        first_seen_at: link.first_seen_at,
+        last_seen_at: link.last_seen_at,
+      }),
     );
   }
   for (const sessionId of sessionIds) {

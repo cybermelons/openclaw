@@ -8,10 +8,7 @@ import {
   type OpenClawAgentDatabase,
 } from "../../state/openclaw-agent-db.js";
 import type { ExactSessionEntry, SessionAccessScope } from "./session-accessor.sqlite-contract.js";
-import {
-  parseReadableSqliteSessionEntryRow,
-  readExactSessionEntryRowValidated,
-} from "./session-accessor.sqlite-entry-store.js";
+import { readExactSessionEntryRowValidated } from "./session-accessor.sqlite-entry-store.js";
 import {
   cloneSessionEntry,
   getSessionKysely,
@@ -20,7 +17,11 @@ import {
   toDatabaseOptions,
   type SessionSqliteTargetResolutionCache,
 } from "./session-accessor.sqlite-scope.js";
-import { assertCanonicalSqliteSessionKeysCurrent } from "./session-canonical-key.js";
+import {
+  assertCanonicalSqliteSessionKeysCurrent,
+  isCanonicalSessionKeyMigrationRequiredError,
+} from "./session-canonical-key.js";
+import { readCanonicalSqliteSessionEntryRow } from "./session-entry-parse.js";
 import type { SessionEntry } from "./types.js";
 
 export type SessionIdentityEvidenceResult =
@@ -146,19 +147,28 @@ function readSessionIdentityEvidenceRows(
 
   const rowsBySessionId = new Map<string, SessionIdentityEvidenceRow[]>();
   const readableKeys = new Set<string>();
+  const blobSessionIdByKey = new Map<string, string>();
   for (const row of rowsByKey.values()) {
-    const rows = rowsBySessionId.get(row.current_session_id) ?? [];
-    rows.push(row);
-    rowsBySessionId.set(row.current_session_id, rows);
+    let entry: SessionEntry | undefined;
     if (row.entry_valid === 1) {
       try {
-        if (parseReadableSqliteSessionEntryRow(database, row)) {
+        const parsed = readCanonicalSqliteSessionEntryRow(database, row);
+        if (parsed) {
+          entry = parsed;
           readableKeys.add(row.session_key);
+          blobSessionIdByKey.set(row.session_key, entry.sessionId);
         }
-      } catch {
+      } catch (error) {
+        if (!isCanonicalSessionKeyMigrationRequiredError(error)) {
+          throw error;
+        }
         // A corrupt row must not make unrelated placements in this store indeterminate.
       }
     }
+    const keyId = entry ? entry.sessionId : row.current_session_id;
+    const rows = rowsBySessionId.get(keyId) ?? [];
+    rows.push(row);
+    rowsBySessionId.set(keyId, rows);
   }
   return items.map((item): SessionIdentityEvidenceResult => {
     const exactRow = rowsByKey.get(item.sessionKey);
@@ -168,7 +178,7 @@ function readSessionIdentityEvidenceRows(
     if (
       exactRow &&
       readableKeys.has(exactRow.session_key) &&
-      exactRow.current_session_id === item.sessionId
+      blobSessionIdByKey.get(exactRow.session_key) === item.sessionId
     ) {
       return { status: "current", sessionKey: item.sessionKey };
     }

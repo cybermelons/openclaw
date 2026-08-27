@@ -7,6 +7,8 @@ import { CURRENT_SESSION_VERSION } from "openclaw/plugin-sdk/agent-sessions";
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import { writeSessionResumeEpoch } from "../../config/sessions/session-accessor.sqlite-resume-epoch-store.js";
+import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { withEnvAsync } from "../../test-utils/env.js";
 import { MAX_AGENT_HOOK_HISTORY_MESSAGES } from "../harness/hook-history.js";
 import { cliBackendLog } from "./log.js";
@@ -124,6 +126,23 @@ function expectBranchSummary(value: unknown, summary: string) {
 
 async function withCliSessionState<T>(stateDir: string, run: () => Promise<T>): Promise<T> {
   return await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, run);
+}
+
+// These fixtures write transcripts straight to a jsonl file with no matching
+// session_nodes row, so the session_resume_epoch AFTER-INSERT trigger never
+// fires. loadCliSessionReseedMessages/loadCliSessionContextEngineMessages now
+// refuse an absent marker as an invariant violation (PHASE-4.md §4 CS-4
+// Decision 3), so tests that exercise those two readers seed a `drained`
+// marker directly for their session key, mirroring CS-3's drain path.
+function seedDrainedResumeEpochMarker(params: { agentId?: string; sessionKey: string }): void {
+  const database = openOpenClawAgentDatabase({ agentId: params.agentId ?? "main" });
+  writeSessionResumeEpoch(database, {
+    sessionKey: params.sessionKey,
+    epoch: 0,
+    state: "drained",
+    sessionId: null,
+    drainedThroughSeq: null,
+  });
 }
 
 describe("loadCliSessionHistoryMessages", () => {
@@ -299,6 +318,7 @@ describe("loadCliSessionHistoryMessages", () => {
 
     try {
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         const history = await loadCliSessionContextEngineMessages({
           sessionId: "session-context-engine-history",
           sessionFile,
@@ -379,6 +399,7 @@ describe("loadCliSessionHistoryMessages", () => {
       // Context-engine snapshots need the compacted summary plus the exact tail
       // records so downstream context reconstruction preserves branch metadata.
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         const history = await loadCliSessionContextEngineMessages({
           sessionId: "session-context-engine-compacted",
           sessionFile,
@@ -670,6 +691,7 @@ describe("loadCliSessionReseedMessages", () => {
 
     try {
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         expect(
           await loadCliSessionReseedMessages({
             sessionId: "session-no-compaction",
@@ -697,6 +719,7 @@ describe("loadCliSessionReseedMessages", () => {
 
     try {
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         const reseed = await loadCliSessionReseedMessages({
           sessionId: "session-bindingless",
           sessionFile,
@@ -724,6 +747,7 @@ describe("loadCliSessionReseedMessages", () => {
 
     try {
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         expect(
           await loadCliSessionReseedMessages({
             sessionId: "session-bindingless-empty",
@@ -753,6 +777,7 @@ describe("loadCliSessionReseedMessages", () => {
 
     try {
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         // Raw transcript reseed is deliberately opt-in and bounded so missing CLI
         // sessions do not replay an unbounded pre-compaction transcript.
         const reseed = await loadCliSessionReseedMessages({
@@ -791,6 +816,7 @@ describe("loadCliSessionReseedMessages", () => {
 
     try {
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         const reseed = await loadCliSessionReseedMessages({
           sessionId: "session-consecutive-ambient",
           sessionFile,
@@ -820,6 +846,7 @@ describe("loadCliSessionReseedMessages", () => {
 
     try {
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         // Auth changes are a hard boundary: old raw messages may belong to a
         // different credential context and must not reseed a fresh CLI session.
         await expect(
@@ -886,6 +913,7 @@ describe("loadCliSessionReseedMessages", () => {
 
     try {
       await withCliSessionState(stateDir, async () => {
+        seedDrainedResumeEpochMarker({ sessionKey: "agent:main:main" });
         const reseed = await loadCliSessionReseedMessages({
           sessionId: "session-compacted",
           sessionFile,

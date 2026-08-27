@@ -10,7 +10,7 @@ import {
   resolveSqliteReadScope,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
-import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
+import { readSessionEntryOrNull } from "./session-entry-parse.js";
 
 const CONVERSATION_REF_PATTERN = /^conv_[a-f0-9]{32}$/u;
 
@@ -87,8 +87,18 @@ function mapConversationRow(row: {
     row.role === "primary" || row.role === "participant" || row.role === "related"
       ? row.role
       : undefined;
+  // Multi-row in effect: this row comes from a per-conversation scan
+  // (selectConversationRows), and a deleted session's node can retain a
+  // placeholder "{}" entry_json that is legitimate steady state, not
+  // corruption — it must resolve as "no current binding" rather than abort
+  // the whole conversation lookup (Fable rule D: silent-skip, not propagate).
   const currentEntry = row.current_entry_json
-    ? parseSessionEntryJson({ entry_json: row.current_entry_json })
+    ? readSessionEntryOrNull(
+        row.current_session_key ?? row.current_session_id ?? row.conversation_id,
+        {
+          entry_json: row.current_entry_json,
+        },
+      )
     : null;
   const hasCurrentBinding = currentEntry?.sessionId === row.current_session_id;
   return {
