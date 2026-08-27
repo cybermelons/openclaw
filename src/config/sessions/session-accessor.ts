@@ -272,6 +272,10 @@ export {
   readSessionTranscriptTitleProbeBatch,
   type SessionTranscriptTitleProbe,
 } from "./session-accessor.sqlite-title-probes.js";
+export {
+  isSessionResumeDrainPendingError,
+  SessionResumeDrainPendingError,
+} from "./session-resume-drain-pending-error.js";
 export type {
   SessionTranscriptBoundedMessageTailPage,
   SessionTranscriptMessageAnchorPage,

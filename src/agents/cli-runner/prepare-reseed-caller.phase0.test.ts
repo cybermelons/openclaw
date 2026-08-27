@@ -5,8 +5,11 @@
 // the dispatch indirectly through context.reusableCliSession (the reason source)
 // and context.openClawHistoryPrompt (whether/what the reseed builder produced).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { writeSessionResumeEpoch } from "../../config/sessions/session-accessor.sqlite-resume-epoch-store.js";
+import { isSessionResumeDrainPendingError } from "../../config/sessions/session-resume-drain-pending-error.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { setActiveDegradedSecretOwners } from "../../secrets/runtime-degraded-state.js";
+import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { readExternalCliBootstrapCredential as readExternalCliBootstrapCredentialImpl } from "../auth-profiles/external-cli-sync.js";
 import { resolveApiKeyForProfile as resolveApiKeyForProfileImpl } from "../auth-profiles/oauth.js";
@@ -84,6 +87,20 @@ function setCliBackendForPrepareTest(
   });
 }
 
+// The fixture's session is filesystem-only (no session_nodes row), so the
+// session_resume_epoch AFTER-INSERT trigger never fires for it. loadCliSessionReseedMessages
+// and loadCliSessionContextEngineMessages now refuse absent markers as an invariant
+// violation (PHASE-4.md §4 CS-4 Decision 3), so every fixture session here needs its
+// marker written directly, mirroring how CS-3's drain path writes it.
+function seedResumeEpochMarker(params: {
+  sessionKey: string;
+  epoch: number;
+  state: "drain_pending" | "drained";
+}): void {
+  const database = openOpenClawAgentDatabase({ agentId: "main" });
+  writeSessionResumeEpoch(database, params);
+}
+
 describe("prepareCliRunContext caller-side reseed reason (phase0)", () => {
   let fixture: ReturnType<typeof createCliRunnerPrepareFixture>;
   let defaultTestCliBackend: ReturnType<typeof buildDefaultTestCliBackend>;
@@ -148,6 +165,11 @@ describe("prepareCliRunContext caller-side reseed reason (phase0)", () => {
       claudeCliSessionTranscriptHasContent: transcriptCheck,
       claudeCliSessionTranscriptHasOrphanedToolUse: orphanCheck,
     });
+    seedResumeEpochMarker({
+      sessionKey: "agent:main:telegram:direct:peer",
+      epoch: 0,
+      state: "drained",
+    });
 
     const context = await fixture.prepare({
       sessionKey: "agent:main:telegram:direct:peer",
@@ -182,6 +204,11 @@ describe("prepareCliRunContext caller-side reseed reason (phase0)", () => {
       claudeCliSessionTranscriptHasContent: transcriptCheck,
       claudeCliSessionTranscriptHasOrphanedToolUse: orphanCheck,
     });
+    seedResumeEpochMarker({
+      sessionKey: "agent:main:telegram:direct:peer",
+      epoch: 0,
+      state: "drained",
+    });
 
     const context = await fixture.prepare({
       sessionKey: "agent:main:telegram:direct:peer",
@@ -202,7 +229,7 @@ describe("prepareCliRunContext caller-side reseed reason (phase0)", () => {
     expect(context.openClawHistoryPrompt).toContain("invalidate-path history marker");
   });
 
-  it("state (c): no reusable session and no invalidatedReason -> reason=no-cli-session, reseed dispatch fires", async () => {
+  it("state (c): reason=no-cli-session, but a drain_pending marker refuses the reseed read (PHASE-4 CS-4)", async () => {
     setCliBackendForPrepareTest({ reseedFromRawTranscriptWhenUncompacted: true });
     fixture.appendTranscript({
       id: "msg-none-1",
@@ -210,17 +237,33 @@ describe("prepareCliRunContext caller-side reseed reason (phase0)", () => {
       timestamp: new Date(1).toISOString(),
       message: { role: "user", content: "bindingless-path history marker", timestamp: 1 },
     });
-
-    const context = await fixture.prepare({
+    // Direct write is expected: no production path produces drain_pending yet
+    // (that lands in a later CS). This pins the reader's refusal behavior.
+    seedResumeEpochMarker({
       sessionKey: "agent:main:telegram:direct:peer",
-      provider: "claude-cli",
-      model: "opus",
-      // No cliSessionBinding and no cliSessionId: reusableCliSessionCandidate is
-      // { mode: "none" }, so invalidatedReason is also undefined.
+      epoch: 3,
+      state: "drain_pending",
     });
 
-    // Case (c): bindingless turn -> reason falls back to "no-cli-session".
-    expect(context.reusableCliSession).toEqual({ mode: "none" });
-    expect(context.openClawHistoryPrompt).toContain("bindingless-path history marker");
+    let thrown: unknown;
+    try {
+      await fixture.prepare({
+        sessionKey: "agent:main:telegram:direct:peer",
+        provider: "claude-cli",
+        model: "opus",
+        // No cliSessionBinding and no cliSessionId: reusableCliSessionCandidate is
+        // { mode: "none" }, so invalidatedReason is also undefined, and reason
+        // falls back to "no-cli-session" -> the reseed dispatch fires and hits
+        // the drain-pending marker.
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(isSessionResumeDrainPendingError(thrown)).toBe(true);
+    if (isSessionResumeDrainPendingError(thrown)) {
+      expect(thrown.sessionId).toBe("agent:main:telegram:direct:peer");
+      expect(thrown.pendingEpoch).toBe(3);
+    }
   });
 });

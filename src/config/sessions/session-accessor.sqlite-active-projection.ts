@@ -6,6 +6,7 @@ import {
   type OpenClawAgentDatabase,
 } from "../../state/openclaw-agent-db.js";
 import type { SessionTranscriptReadScope } from "./session-accessor.sqlite-contract.js";
+import { readSessionResumeEpoch } from "./session-accessor.sqlite-resume-epoch-store.js";
 import {
   resolveSqliteTranscriptReadScope,
   toDatabaseOptions,
@@ -125,4 +126,21 @@ export function withCurrentProjectionSnapshot<T>(
     preferredSessionId: resolved.sessionId,
   });
   throw new SessionTranscriptProjectionUnavailableError(resolved.sessionId);
+}
+
+/**
+ * Resolves the session_resume_epoch marker (PHASE-4.md §3, §3a) on the same
+ * database handle a subsequent `withCurrentProjectionSnapshot` transcript
+ * read on the same scope would use, so marker + transcript observe one
+ * resolved database. Resume/reseed readers call this immediately before
+ * their transcript read (PHASE-4.md §4 CS-4); non-resume readers must never
+ * call it (§7c).
+ */
+export function readSessionResumeEpochForScope(
+  scope: SessionTranscriptReadScope,
+  sessionKey: string,
+) {
+  return withCurrentProjectionSnapshot(scope, (projection) =>
+    readSessionResumeEpoch(projection.database, sessionKey),
+  );
 }

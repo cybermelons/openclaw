@@ -15,6 +15,8 @@ import {
   isSessionTranscriptProjectionUnavailableError,
   readSessionTranscriptMessageEvents,
 } from "../../config/sessions/session-accessor.sqlite-active-events.js";
+import { readSessionResumeEpochForScope } from "../../config/sessions/session-accessor.sqlite-active-projection.js";
+import { SessionResumeDrainPendingError } from "../../config/sessions/session-resume-drain-pending-error.js";
 import {
   parseSessionTranscriptTreeEntry,
   scanSessionTranscriptTree,
@@ -558,6 +560,47 @@ async function readSqliteCliSessionEntries(params: {
   return undefined;
 }
 
+/**
+ * Refuses a drain-pending session_resume_epoch marker before a resume/reseed
+ * transcript read (PHASE-4.md §4 CS-4, §7c). Reads the marker via the same
+ * scope the subsequent `readSqliteCliSessionEntriesOnce` call resolves, so
+ * marker and transcript observe one snapshot. Only `loadCliSessionReseedMessages`
+ * and `loadCliSessionContextEngineMessages` call this — non-resume readers
+ * (`loadCliSessionHistoryMessages`, `hasCliSessionTranscript`) must not.
+ */
+function refuseIfCliSessionResumeDrainPending(params: {
+  sessionId: string;
+  sessionKey?: string;
+  agentId?: string;
+}): void {
+  if (!params.sessionKey) {
+    // session_resume_epoch is keyed by session_key, and only sessions with a
+    // session_key ever get a row via the CS-2 AFTER-INSERT trigger. Callers
+    // without a durable session_key (RunCliAgentParams.sessionKey is optional —
+    // ephemeral/isolated runs, e.g. src/agents/isolated-completion.ts,
+    // src/cron/isolated-agent/*) never participate in the resume-epoch system,
+    // so there is no marker to refuse. Nothing to check; proceed.
+    return;
+  }
+  const marker = readSessionResumeEpochForScope(
+    {
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      ...(params.agentId ? { agentId: params.agentId } : {}),
+    },
+    params.sessionKey,
+  );
+  if (!marker) {
+    throw new Error(
+      `session_resume_epoch marker invariant violated: no marker row for session ${params.sessionKey} ` +
+        "(CS-2 migration + AFTER-INSERT trigger guarantee a row for every session at epoch 0)",
+    );
+  }
+  if (marker.state === "drain_pending") {
+    throw new SessionResumeDrainPendingError(params.sessionKey, marker.epoch);
+  }
+}
+
 async function loadCliSessionEntries(params: {
   sessionId: string;
   sessionFile: string;
@@ -722,6 +765,7 @@ export async function loadCliSessionContextEngineMessages(params: {
   agentId?: string;
   config?: OpenClawConfig;
 }): Promise<unknown[]> {
+  refuseIfCliSessionResumeDrainPending(params);
   const entries = await loadCliSessionEntries(params);
   const latestCompactionIndex = entries.findLastIndex((entry) => {
     const candidate = entry as HistoryEntry;
@@ -768,6 +812,7 @@ export async function loadCliSessionReseedMessages(params: {
   allowRawTranscriptReseed?: boolean;
   rawTranscriptReseedReason?: RawTranscriptReseedReason;
 }): Promise<unknown[]> {
+  refuseIfCliSessionResumeDrainPending(params);
   const entries = await loadCliSessionEntries(params);
   const loadRawTail = () => {
     if (
