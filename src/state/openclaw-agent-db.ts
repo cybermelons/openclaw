@@ -520,6 +520,12 @@ function openOpenClawAgentDatabaseInternal(
       });
     }
     ensureOpenClawAgentDatabasePermissions(pathname, databaseOptions);
+    // The IIFE only yields `undefined` on the corruption-fallback path, which is
+    // exhausted by the `fallbackRecovered` early return above; reaching here means
+    // pragma configuration succeeded and produced live WAL maintenance.
+    if (!walMaintenance) {
+      throw new Error(`unreachable: agent database opened without WAL maintenance (${pathname})`);
+    }
     const database = { agentId, db, path: pathname, walMaintenance };
     openedDatabase = database;
     if (!isValidatedReopen) {
