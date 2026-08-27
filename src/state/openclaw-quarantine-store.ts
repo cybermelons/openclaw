@@ -14,10 +14,22 @@ import {
 import { VERSION } from "../version.js";
 import { resolveOpenClawStateSqliteDir } from "./openclaw-state-db.paths.js";
 
-const OPENCLAW_QUARANTINE_SCHEMA_VERSION = 3;
+const OPENCLAW_QUARANTINE_SCHEMA_VERSION = 4;
 const OPENCLAW_QUARANTINE_BUSY_TIMEOUT_MS = 5_000;
 const OPENCLAW_QUARANTINE_DIR_MODE = 0o700;
 const OPENCLAW_QUARANTINE_FILE_MODE = 0o600;
+
+/**
+ * Row-level quarantine key space (PHASE-2.md §6), keyed by `session_key`
+ * rather than the database-level `path`. Same store, separate table — added
+ * at schema version 4. UNUSED by any write path until CS-4.
+ */
+const CREATE_QUARANTINED_SESSION_ROWS_TABLE_SQL = `
+      CREATE TABLE IF NOT EXISTS quarantined_session_rows (
+        session_key TEXT NOT NULL PRIMARY KEY,
+        reason TEXT NOT NULL,
+        quarantined_at INTEGER NOT NULL
+      ) STRICT;`;
 
 type OpenClawDatabaseKind = "agent" | "state";
 
@@ -62,6 +74,7 @@ function configureQuarantineWriter(database: DatabaseSync, storePath: string): v
       ALTER TABLE quarantined_databases ADD COLUMN verified_generation TEXT;
       ALTER TABLE quarantined_databases ADD COLUMN failing_check TEXT;
       ALTER TABLE quarantined_databases ADD COLUMN quarantined_file_path TEXT;
+      ${CREATE_QUARANTINED_SESSION_ROWS_TABLE_SQL}
       PRAGMA user_version = ${OPENCLAW_QUARANTINE_SCHEMA_VERSION};
       COMMIT;
     `);
@@ -72,6 +85,16 @@ function configureQuarantineWriter(database: DatabaseSync, storePath: string): v
       BEGIN IMMEDIATE;
       ALTER TABLE quarantined_databases ADD COLUMN failing_check TEXT;
       ALTER TABLE quarantined_databases ADD COLUMN quarantined_file_path TEXT;
+      ${CREATE_QUARANTINED_SESSION_ROWS_TABLE_SQL}
+      PRAGMA user_version = ${OPENCLAW_QUARANTINE_SCHEMA_VERSION};
+      COMMIT;
+    `);
+    return;
+  }
+  if (userVersion === 3) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      ${CREATE_QUARANTINED_SESSION_ROWS_TABLE_SQL}
       PRAGMA user_version = ${OPENCLAW_QUARANTINE_SCHEMA_VERSION};
       COMMIT;
     `);
@@ -89,6 +112,7 @@ function configureQuarantineWriter(database: DatabaseSync, storePath: string): v
       failing_check TEXT,
       quarantined_file_path TEXT
     ) STRICT;
+    ${CREATE_QUARANTINED_SESSION_ROWS_TABLE_SQL}
     PRAGMA user_version = ${OPENCLAW_QUARANTINE_SCHEMA_VERSION};
     COMMIT;
   `);
@@ -306,6 +330,131 @@ export function clearOpenClawDatabaseQuarantine(
         database
           .prepare("DELETE FROM quarantined_databases WHERE path = ?")
           .run(path.resolve(pathname));
+        database.exec("COMMIT;");
+        return true;
+      } catch (error) {
+        database.exec("ROLLBACK;");
+        throw error;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Row-level quarantine marker for a single corrupt `session_nodes` row
+ * (PHASE-2.md §6, CORRUPTION-FALLBACK Item 4). Same store as the
+ * database-level quarantine (`OpenClawDatabaseQuarantine`), in a sibling
+ * table keyed by `sessionKey` instead of a filesystem `path` — the two key
+ * spaces never collide because they live in different tables.
+ *
+ * UNUSED until CS-4: this is API surface only (types + functions) so CS-4's
+ * pipeline boundary can call it when it starts writing row-level markers on
+ * `SessionRowCorruptError`. No caller exists yet.
+ */
+export type OpenClawSessionRowQuarantine = {
+  sessionKey: string;
+  quarantinedAt: number;
+  reason: string;
+};
+
+/** Read one row-level quarantine marker for `sessionKey`, if any. */
+export function readOpenClawSessionRowQuarantine(
+  sessionKey: string,
+  options: { env?: NodeJS.ProcessEnv } = {},
+): OpenClawSessionRowQuarantine | undefined {
+  const storePath = resolveQuarantineStorePath(options.env ?? process.env);
+  if (!existsSync(storePath)) {
+    return undefined;
+  }
+  const database = openNodeSqliteDatabase(storePath);
+  try {
+    database.exec(`PRAGMA busy_timeout = ${OPENCLAW_QUARANTINE_BUSY_TIMEOUT_MS};`);
+    const userVersion = readQuarantineSchemaVersion(database, storePath);
+    if (userVersion === 0) {
+      return undefined;
+    }
+    if (userVersion > OPENCLAW_QUARANTINE_SCHEMA_VERSION) {
+      throw new Error(
+        `OpenClaw quarantine store ${storePath} uses newer schema version ${userVersion}.`,
+      );
+    }
+    // Pre-v4 stores predate the sessionKey key-space; the table does not
+    // exist yet and no marker can have been written.
+    if (userVersion < 4) {
+      return undefined;
+    }
+    const row = database
+      .prepare(
+        "SELECT reason, quarantined_at FROM quarantined_session_rows WHERE session_key = ? LIMIT 1",
+      )
+      .get(sessionKey) as { reason?: unknown; quarantined_at?: unknown } | undefined;
+    if (!row) {
+      return undefined;
+    }
+    if (
+      typeof row.reason !== "string" ||
+      typeof row.quarantined_at !== "number" ||
+      !Number.isInteger(row.quarantined_at)
+    ) {
+      throw new Error(`OpenClaw quarantine store ${storePath} contains an invalid row.`);
+    }
+    return { sessionKey, quarantinedAt: row.quarantined_at, reason: row.reason };
+  } finally {
+    database.close();
+  }
+}
+
+/** Persist one row-level quarantine marker for `sessionKey`. Never auto-cleared. */
+export function recordOpenClawSessionRowQuarantine(options: {
+  env?: NodeJS.ProcessEnv;
+  sessionKey: string;
+  reason: string;
+}): boolean {
+  try {
+    return withQuarantineWriter(options.env ?? process.env, (database) => {
+      database.exec("BEGIN IMMEDIATE;");
+      try {
+        database
+          .prepare(
+            `
+              INSERT INTO quarantined_session_rows (session_key, reason, quarantined_at)
+              VALUES (?, ?, ?)
+              ON CONFLICT(session_key) DO UPDATE SET
+                reason = excluded.reason,
+                quarantined_at = excluded.quarantined_at
+            `,
+          )
+          .run(options.sessionKey, options.reason, Date.now());
+        database.exec("COMMIT;");
+        return true;
+      } catch (error) {
+        database.exec("ROLLBACK;");
+        throw error;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** Clear one row-level quarantine marker. Operator (doctor) or verified restore only. */
+export function clearOpenClawSessionRowQuarantine(
+  sessionKey: string,
+  options: { env?: NodeJS.ProcessEnv } = {},
+): boolean {
+  const env = options.env ?? process.env;
+  if (!existsSync(resolveQuarantineStorePath(env))) {
+    return true;
+  }
+  try {
+    return withQuarantineWriter(env, (database) => {
+      database.exec("BEGIN IMMEDIATE;");
+      try {
+        database
+          .prepare("DELETE FROM quarantined_session_rows WHERE session_key = ?")
+          .run(sessionKey);
         database.exec("COMMIT;");
         return true;
       } catch (error) {

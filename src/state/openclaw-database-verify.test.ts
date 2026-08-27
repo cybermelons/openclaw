@@ -577,8 +577,10 @@ describe("OpenClaw database integrity verifier", () => {
       expect(raw.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" });
       expect(readSqliteNumberPragma(raw, "synchronous")).toBe(2);
       // Bumped by CORRUPTION-FALLBACK 6a's sticky-marker columns (failing_check,
-      // quarantined_file_path); see openclaw-quarantine-store.ts schema v3.
-      expect(readSqliteNumberPragma(raw, "user_version")).toBe(3);
+      // quarantined_file_path) to v3, then by PHASE-2.md §6's row-level
+      // sessionKey key-space (quarantined_session_rows table) to v4; see
+      // openclaw-quarantine-store.ts.
+      expect(readSqliteNumberPragma(raw, "user_version")).toBe(4);
     } finally {
       raw.close();
     }
@@ -670,9 +672,10 @@ describe("OpenClaw database integrity verifier", () => {
 
     const migrated = new DatabaseSync(storePath, { readOnly: true });
     try {
-      // Bumped by CORRUPTION-FALLBACK 6a's sticky-marker columns; a v1 row
-      // migrates straight through to the current schema v3 on next write.
-      expect(readSqliteNumberPragma(migrated, "user_version")).toBe(3);
+      // Bumped by CORRUPTION-FALLBACK 6a's sticky-marker columns and PHASE-2.md
+      // §6's row-level sessionKey key-space; a v1 row migrates straight
+      // through to the current schema v4 on next write.
+      expect(readSqliteNumberPragma(migrated, "user_version")).toBe(4);
       expect(
         migrated
           .prepare("SELECT reason, verified_generation FROM quarantined_databases WHERE path = ?")

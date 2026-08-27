@@ -26,7 +26,9 @@ function sleepWithBackoffJitter(attempt: number): Promise<void> {
  * (PHASE-1.md §5).
  *
  * Retries ONLY `err instanceof SessionConflictError && err.retryable === true`;
- * any other error rethrows immediately. On budget exhaustion, rethrows the
+ * any other error rethrows immediately — including `SessionRowCorruptError`
+ * (`retryable: false`, PHASE-2.md §6): a corrupt blob does not heal, so it
+ * rethrows on attempt 1 with no retry. On budget exhaustion, rethrows the
  * last `SessionConflictError`.
  *
  * Stale-closure tripwire: if two CONSECUTIVE conflicts arrive with the same
