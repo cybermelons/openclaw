@@ -28,6 +28,7 @@ export function readSessionEntriesByStatus(
   sessionKeys?: readonly string[],
 ): SessionEntrySummary[] {
   const selectedStatuses = [...new Set(statuses)];
+  const selectedStatusSet = new Set(selectedStatuses);
   const selectedSessionKeys = sessionKeys ? [...new Set(sessionKeys)] : undefined;
   if (selectedStatuses.length === 0 || selectedSessionKeys?.length === 0) {
     return [];
@@ -36,6 +37,10 @@ export function readSessionEntriesByStatus(
   let query = db
     .selectFrom("session_nodes")
     .select(["session_key", "entry_json", "current_session_id", "updated_at"])
+    // Cheap pre-narrow only (index job): membership is decided below against
+    // the blob-sourced `entry.status`, since the projected VALUES are already
+    // blob-sourced (Phase 3 §8c — a SQL filter gating a side effect must
+    // re-verify against the blob).
     .where("status", "in", selectedStatuses);
   if (selectedSessionKeys) {
     query = query.where("session_key", "in", selectedSessionKeys);
@@ -43,7 +48,11 @@ export function readSessionEntriesByStatus(
   return executeSqliteQuerySync(database.db, query)
     .rows.flatMap((row) => {
       try {
-        return [{ entry: projectSessionEntry(row.session_key, row), sessionKey: row.session_key }];
+        const entry = projectSessionEntry(row.session_key, row);
+        if (!entry.status || !selectedStatusSet.has(entry.status)) {
+          return [];
+        }
+        return [{ entry, sessionKey: row.session_key }];
       } catch (error) {
         if (!isSessionRowCorruptError(error)) {
           throw error;
