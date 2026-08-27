@@ -109,7 +109,7 @@ export function normalizeSidebarLayout(value: unknown): SidebarLayout {
   return {
     columns,
     dock: value.dock === "bottom" ? "bottom" : "right",
-    open: typeof value.open === "boolean" ? value.open : columns.length > 0,
+    open: columns.length > 0 && (typeof value.open === "boolean" ? value.open : true),
     expanded: value.expanded === true,
   };
 }
