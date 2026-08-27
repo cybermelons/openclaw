@@ -84,3 +84,24 @@ Phase 4 must leave, as a stable exported surface: (1) the `resume_epoch` marker 
 Phase 4 is landable when: CS-1..CS-6 merged in order; T1/T2/T3 green; the rewritten reseed pin green; full Phase-0..4 wall green; oxlint clean; the sleep-retry loop and its helpers absent from the tree. Post-merge human steps: soak on live DB watching `SessionResumeDrainPendingError` rates and resumption-scan recovery after a forced restart.
 
 **Predecessors:** Phase 4 does **not** require Phase-3 CS-7 (the column DROP) to have executed. CS-7 is a post-soak cleanup; Phase 4 builds on Phase-3's blob-truth reads, which are already landed. No other Phase-3 step blocks Phase 4.
+
+## Landing log
+
+Per-CS landed state on `rearch/session-store`. Not merged to `main`, not deployed. Tracking issue: cybermelons/openclaw#38.
+
+| CS   | SHA           | State   | Gates                                                                                                                              |
+| ---- | ------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| CS-1 | `2bdbbe889dd` | landed  | audit doc reviewed; 3 stale spec line-refs corrected + re-verified against tree                                                    |
+| §3a  | `2d26c882c83` | landed  | marker shape pinned (dedicated `session_resume_epoch` table)                                                                       |
+| CS-2 | `7e4d69ba170` | landed  | marker CRUD 4/4, migration 2/2, doctor 15/15, phase-1 CAS 10/10, oxlint clean; trigger seeds new sessions                          |
+| CS-3 | `4619864a0fb` | landed  | reconcile+drainTailForResume 8/8, recovery 160/160, Phase-0 pin 3/3 (unflipped), doctor 15/15; timeout fallthrough deleted         |
+| CS-4 | `f6046d322e8` | landed  | T2 4/4, Phase-0 pin 3/3 (flipped for state c), reader 31/31, doctor 15/15, oxlint clean                                            |
+| CS-5 | `feadda719ed` | landed  | fallback 7/7, reader 31/31, doctor 15/15, oxlint clean (session-history.ts max-lines 865→720, still over 700 — recorded follow-up) |
+| CS-6 | —             | pending | Phase-4 wall consolidation + #24 seam doc                                                                                          |
+
+**Deviations from spec, accepted:**
+
+- **CS-4 keyless-session skip.** Fable's Decision 3 said absent-row = throw invariant-violation. CS-4 scopes that to sessions _with_ a `session_key`: `session_resume_epoch` is keyed by `session_key`, so a keyless (ephemeral/isolated) run cannot hold a marker row and skips the check. The resume path always carries a keyed main session, so no drain-pending resume is ever skipped. Correction, not drift.
+- **CS-3 epoch increment.** Implementer prose said `current?.epoch ?? 0 + 1` (a precedence bug), but the committed code is `(current?.epoch ?? 0) + 1` — correct and monotonic. Verified against the tree.
+
+**Open seams still owned by issue #38** (not resolved by CS-1..CS-5): items 1–6 in the issue — the marker/transcript key gap (§II.1), `drain_pending` never written in production, restart-scan dispatch derivation, lazy-stub epoch seeding, cross-window duplication, and the smaller unowned items. These gate the Phase 4.5 green-light decision, not CS-6.
