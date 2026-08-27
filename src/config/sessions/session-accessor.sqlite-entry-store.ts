@@ -46,14 +46,16 @@ import {
   assertCanonicalSqliteSessionKeysCurrent,
   assertCanonicalSessionKeyWriteMatchesDatabase,
   canonicalSessionKeyMigrationRequiredError,
+  isCanonicalSessionKeyMigrationRequiredError,
 } from "./session-canonical-key.js";
 import { sessionCasValueCompareEnabled } from "./session-cas-mode.js";
 import { SessionConflictError } from "./session-conflict-error.js";
 import {
   hasValidSessionEntryIdentity,
-  parseReadableSqliteSessionEntryRow,
-  parseSessionEntryJson,
+  projectSessionEntry,
+  readCanonicalSqliteSessionEntryRow,
 } from "./session-entry-parse.js";
+import { isSessionRowCorruptError } from "./session-row-corrupt-error.js";
 import {
   collectSessionEntryLookupKeys,
   resolveDeliveryProvenCanonicalSessionKey,
@@ -124,7 +126,15 @@ function readSessionEntryRowUnchecked(
   ).rows;
   let selected: ResolvedSessionEntryRow | undefined;
   for (const row of rows) {
-    const entry = parseReadableSqliteSessionEntryRow(database, row);
+    let entry: SessionEntry | null;
+    try {
+      entry = readCanonicalSqliteSessionEntryRow(database, row);
+    } catch (error) {
+      if (!isCanonicalSessionKeyMigrationRequiredError(error)) {
+        throw error;
+      }
+      continue;
+    }
     if (!entry || row.session_key !== sessionKey.trim()) {
       continue;
     }
@@ -216,7 +226,7 @@ export function readExactSessionEntryRow(
   if (!row) {
     return undefined;
   }
-  const entry = parseReadableSqliteSessionEntryRow(database, row);
+  const entry = readCanonicalSqliteSessionEntryRow(database, row);
   return entry ? { entry, legacyKeys: [], row } : undefined;
 }
 
@@ -258,9 +268,12 @@ export function readSessionEntryStore(
   for (const row of rows) {
     // Doctor lifecycle projection supplies its separately hydrated expected entry for rejected
     // raw rows; ordinary exact reads still fail loud before a write can replace one.
-    const entry = parseSessionEntryJson(row);
-    if (entry) {
-      store[row.session_key] = entry;
+    try {
+      store[row.session_key] = projectSessionEntry(row.session_key, row);
+    } catch (error) {
+      if (!isSessionRowCorruptError(error)) {
+        throw error;
+      }
     }
   }
   return store;
@@ -270,9 +283,19 @@ export function readSessionEntryCount(database: OpenClawAgentDatabase): number {
   const db = getSessionKysely(database.db);
   const rows = executeSqliteQuerySync(
     database.db,
-    db.selectFrom("session_nodes").select("entry_json"),
+    db.selectFrom("session_nodes").select(["entry_json", "session_key"]),
   ).rows;
-  return rows.reduce((count, row) => count + (parseSessionEntryJson(row) ? 1 : 0), 0);
+  return rows.reduce((count, row) => {
+    try {
+      projectSessionEntry(row.session_key, row);
+      return count + 1;
+    } catch (error) {
+      if (!isSessionRowCorruptError(error)) {
+        throw error;
+      }
+      return count;
+    }
+  }, 0);
 }
 
 export function readSessionEntryKeys(database: OpenClawAgentDatabaseReader): string[] {
@@ -283,7 +306,17 @@ export function readSessionEntryKeys(database: OpenClawAgentDatabaseReader): str
       .selectFrom("session_nodes")
       .select(["entry_json", "session_key"])
       .orderBy("session_key", "asc"),
-  ).rows.flatMap((row) => (parseSessionEntryJson(row) ? [row.session_key] : []));
+  ).rows.flatMap((row) => {
+    try {
+      projectSessionEntry(row.session_key, row);
+      return [row.session_key];
+    } catch (error) {
+      if (!isSessionRowCorruptError(error)) {
+        throw error;
+      }
+      return [];
+    }
+  });
 }
 
 export function resolveLifecyclePrimaryEntry(
@@ -406,8 +439,15 @@ export function deleteSessionEntryRows(
       if (node.current_session_id === window.session_id) {
         return true;
       }
-      const entry = parseSessionEntryJson(node);
-      return entry ? collectSessionStateIdsForEntry(entry).includes(window.session_id) : false;
+      try {
+        const entry = projectSessionEntry(node.session_key, node);
+        return collectSessionStateIdsForEntry(entry).includes(window.session_id);
+      } catch (error) {
+        if (!isSessionRowCorruptError(error)) {
+          throw error;
+        }
+        return false;
+      }
     });
     if (survivingNode) {
       executeSqliteQuerySync(

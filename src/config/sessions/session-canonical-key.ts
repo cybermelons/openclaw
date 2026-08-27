@@ -115,6 +115,12 @@ export function canonicalSessionKeyMigrationRequiredError(
   return new SessionCanonicalKeyMigrationRequiredError(detail);
 }
 
+export function isCanonicalSessionKeyMigrationRequiredError(
+  error: unknown,
+): error is SessionCanonicalKeyMigrationRequiredError {
+  return error instanceof SessionCanonicalKeyMigrationRequiredError;
+}
+
 export function assertCanonicalSqliteSessionKeysCurrent(
   database: { agentId: string; db: DatabaseSync },
   mainKey?: string,

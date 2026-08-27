@@ -13,13 +13,9 @@ import {
   assertCanonicalSessionKeyWriteMatchesDatabase,
   canonicalSessionKeyMigrationRequiredError,
 } from "./session-canonical-key.js";
-import { parseSessionEntryJson } from "./session-entry-parse.js";
+import { readCanonicalSqliteSessionEntryRow } from "./session-entry-parse.js";
 import { deleteSessionTranscriptIndexInTransaction } from "./session-transcript-index.js";
-import {
-  foldedSessionKeyAliasCandidates,
-  normalizeStoreSessionKey,
-  resolveDeliveryProvenCanonicalSessionKey,
-} from "./store-entry.js";
+import { foldedSessionKeyAliasCandidates, normalizeStoreSessionKey } from "./store-entry.js";
 
 function createTranscriptGeneration(): string {
   return randomUUID().replaceAll("-", "");
@@ -110,34 +106,10 @@ export function ensureTranscriptSessionRoot(
         .where("session_key", "in", lookupKeys),
     ).rows;
     for (const candidate of candidates) {
-      const entry = parseSessionEntryJson(candidate);
-      if (!entry) {
-        const retainedWindow =
-          candidate.entry_json === "{}"
-            ? executeSqliteQueryTakeFirstSync(
-                database.db,
-                db
-                  .selectFrom("session_windows")
-                  .select("session_id")
-                  .where("session_id", "=", candidate.current_session_id)
-                  .where("session_key", "=", candidate.session_key),
-              )
-            : undefined;
-        if (!retainedWindow) {
-          throw canonicalSessionKeyMigrationRequiredError(
-            `invalid persisted session row requires repair for ${candidate.session_key}`,
-          );
-        }
-        continue;
-      }
-      if (
-        resolveDeliveryProvenCanonicalSessionKey(candidate.session_key, entry) !==
-        candidate.session_key
-      ) {
-        throw canonicalSessionKeyMigrationRequiredError(
-          `non-canonical persisted row resolves to session key ${candidate.session_key}`,
-        );
-      }
+      // readCanonicalSqliteSessionEntryRow performs the parse, retained-window
+      // special case, and canonical-key check in one place (Fable rule D:
+      // single logical resolution per row, no manual reimplementation here).
+      readCanonicalSqliteSessionEntryRow(database, candidate);
     }
     const existing = candidates.find((candidate) => candidate.session_key === scope.sessionKey);
     if (existing && existing.entry_valid !== 1) {

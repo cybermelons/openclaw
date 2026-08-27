@@ -5,7 +5,8 @@ import type {
   SessionEntryStatus,
   SessionEntrySummary,
 } from "./session-accessor.sqlite-contract.js";
-import { hasValidSessionEntryIdentity, parseSessionEntryJson } from "./session-entry-parse.js";
+import { hasValidSessionEntryIdentity, projectSessionEntry } from "./session-entry-parse.js";
+import { isSessionRowCorruptError } from "./session-row-corrupt-error.js";
 
 type SessionStatusDatabase = Pick<OpenClawAgentKyselyDatabase, "session_nodes">;
 
@@ -41,8 +42,14 @@ export function readSessionEntriesByStatus(
   }
   return executeSqliteQuerySync(database.db, query)
     .rows.flatMap((row) => {
-      const entry = parseSessionEntryJson(row);
-      return entry ? [{ entry, sessionKey: row.session_key }] : [];
+      try {
+        return [{ entry: projectSessionEntry(row.session_key, row), sessionKey: row.session_key }];
+      } catch (error) {
+        if (!isSessionRowCorruptError(error)) {
+          throw error;
+        }
+        return [];
+      }
     })
     .toSorted((a, b) => a.sessionKey.localeCompare(b.sessionKey));
 }

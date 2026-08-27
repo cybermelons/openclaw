@@ -13,11 +13,36 @@
 //
 // Zero production changes. Test + fixtures only.
 import { beforeEach, describe, expect, it } from "vitest";
+import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { useTempSqliteSessionStore } from "./phase0-fixtures.test-support.js";
 import {
-  parseReadableSqliteSessionEntryRow,
-  parseSessionEntryJson,
+  parseSessionEntryBlob,
+  readCanonicalSqliteSessionEntryRow,
+  type SessionEntryBlobRow,
 } from "./session-entry-parse.js";
+import type { SessionEntry } from "./types.js";
+
+// Local shims reproducing the exact pre-collapse call contracts this oracle
+// pins (Delta B): CS-3/CS-4 deleted both named functions, routing every real
+// caller through `projectSessionEntry`/`readCanonicalSqliteSessionEntryRow`.
+// This file's job is to prove the frozen baseline still holds, so the shims
+// intentionally do NOT use the new required-`participants`-array pipeline
+// boundary (`projectSessionEntry`) — that shape change is real and pinned
+// elsewhere (session-accessor.sqlite-data-version.test.ts), not here.
+
+/** Shim for the deleted participant-less, silent-null `parseSessionEntryJson`. */
+function parseSessionEntryJson(row: SessionEntryBlobRow): SessionEntry | null {
+  const result = parseSessionEntryBlob("shim", row);
+  return result.ok ? result.entry : null;
+}
+
+/** Shim for the deleted participant-full, throwing `parseReadableSqliteSessionEntryRow`. */
+function parseReadableSqliteSessionEntryRow(
+  database: Pick<OpenClawAgentDatabase, "db">,
+  row: { current_session_id: string; session_key: string } & SessionEntryBlobRow,
+): SessionEntry | null {
+  return readCanonicalSqliteSessionEntryRow(database, row);
+}
 
 type RawSessionNodeRow = {
   current_session_id: string;

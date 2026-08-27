@@ -39,7 +39,7 @@ import { loadTranscriptEventsFromDatabase } from "./session-accessor.sqlite-read
 import { collectSessionStateIdsForEntry } from "./session-accessor.sqlite-references.js";
 import { cloneSessionEntry, getSessionKysely } from "./session-accessor.sqlite-scope.js";
 import { SessionConflictError } from "./session-conflict-error.js";
-import { parseSessionEntryJson } from "./session-entry-parse.js";
+import { readSessionEntryOrNull } from "./session-entry-parse.js";
 import { buildSessionResetBoundaryPlan } from "./session-reset-boundary-event.js";
 import { deleteSessionTranscriptIndexInTransaction } from "./session-transcript-index.js";
 import type { SessionEntry } from "./types.js";
@@ -53,9 +53,13 @@ export function shouldRemoveSessionEntry(
   if (!entry) {
     return false;
   }
+  // sqliteSessionEntriesEqual, not raw JSON.stringify: plan-time (projectSessionEntry)
+  // and commit-time (readCanonicalSqliteSessionEntryRow) reads intentionally differ on
+  // participants/participantCount when empty (Phase 2 CS-4, §4); raw JSON would treat
+  // that shape-only gap as a conflict and drop every removal.
   if (
     removal.expectedEntry !== undefined &&
-    JSON.stringify(entry) !== JSON.stringify(removal.expectedEntry)
+    !sqliteSessionEntriesEqual(entry, removal.expectedEntry)
   ) {
     return false;
   }
@@ -158,7 +162,7 @@ export function readReferencedSessionIds(
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryJson(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (!entry) {
       continue;
     }
@@ -190,7 +194,7 @@ export function readReferencedSessionIdsAfterTargetMutation(
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryJson(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (!entry) {
       continue;
     }
@@ -530,7 +534,7 @@ export function collectProjectedReferencedSessionIds(params: {
       continue;
     }
     sessionIds.add(row.current_session_id);
-    const entry = parseSessionEntryJson(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     if (!entry) {
       continue;
     }
@@ -666,7 +670,7 @@ export function planSessionLifecycleArtifactCleanup(
     ) {
       continue;
     }
-    const entry = parseSessionEntryJson(row);
+    const entry = readSessionEntryOrNull(row.session_key, row);
     const sessionIds = uniqueStrings([
       row.current_session_id,
       ...(entry ? collectSessionStateIdsForEntry(entry) : []),

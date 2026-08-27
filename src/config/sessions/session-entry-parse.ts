@@ -1,16 +1,24 @@
-// Phase 2 CS-3 (PHASE-2.md §3): the ONE parser for a `session_nodes.entry_json`
-// blob. Replaces the two parsers it unifies:
+// Phase 2 CS-3/CS-4 (PHASE-2.md §3/§4): the ONE parser plus the ONE pipeline
+// for a `session_nodes.entry_json` blob. Replaces the two parsers/functions
+// they unify:
 //   - parseSessionEntryJson (session-accessor.sqlite-status.ts) — participant-less, silent-null.
 //   - parseReadableSqliteSessionEntryRow (session-accessor.sqlite-entry-store.ts) — participant-full, throwing.
 //
-// Contract: a discriminated Result, never a throw (Delta A, §14). The parser
-// receives the blob (+ row key for error identity) and whatever columns/
-// satellite records the caller already resolved — no second query, no
-// cross-row reference happens inside this function. Row-not-found stays the
-// caller's job (return null/undefined BEFORE calling this parser); this
-// parser only judges a found-but-unparseable blob.
+// Contract: `parseSessionEntryBlob` is a discriminated Result, never a throw
+// (Delta A, §14). The parser receives the blob (+ row key for error
+// identity) and whatever columns/satellite records the caller already
+// resolved — no second query, no cross-row reference happens inside this
+// function. Row-not-found stays the caller's job (return null/undefined
+// BEFORE calling this parser); this parser only judges a found-but-unparseable
+// blob.
+//
+// `projectSessionEntry` (CS-4, §4) is the one pipeline boundary: it always
+// resolves participants (shape -> owner -> participants), and on
+// `{ ok: false }` it quarantines the row (§6) then throws the
+// `SessionRowCorruptError` — the ONLY place a corrupt Result becomes a throw.
 import { executeSqliteQueryTakeFirstSync } from "../../infra/kysely-sync.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
+import { recordOpenClawSessionRowQuarantine } from "../../state/openclaw-quarantine-store.js";
 import {
   projectSqliteSessionOwner,
   type SqliteSessionOwnerRow,
@@ -26,12 +34,12 @@ import {
   hasValidSessionEntryIdentity,
   parseSqliteSessionEntryRecord,
 } from "./session-entry-json.js";
-import { SessionRowCorruptError } from "./session-row-corrupt-error.js";
+import { isSessionRowCorruptError, SessionRowCorruptError } from "./session-row-corrupt-error.js";
 import { projectCanonicalSessionEntryShape } from "./store-entry-shape.js";
 import { resolveDeliveryProvenCanonicalSessionKey } from "./store-entry.js";
 import type { SessionEntry } from "./types.js";
 
-export { hasValidSessionEntryIdentity };
+export { hasValidSessionEntryIdentity, isSessionRowCorruptError };
 
 /** The one canonical session-entry shape a parse produces. */
 export type CanonicalSessionEntryShape = SessionEntry;
@@ -82,36 +90,64 @@ export function parseSessionEntryBlob(
 }
 
 /**
- * Interim compatibility wrapper (Delta A, §14) for every participant-less,
- * silent-null-on-corrupt call site that used to call the now-deleted
- * `parseSessionEntryJson` (formerly session-accessor.sqlite-status.ts).
- * Maps `{ ok: false }` to `null`, matching that function's current behavior
- * exactly — no observable change in CS-3.
+ * The one pipeline boundary (Phase 2 CS-4, §4): shape -> owner -> participants,
+ * always resolved. On a corrupt blob, quarantines the row (§6) and throws the
+ * `SessionRowCorruptError` — the ONLY place a corrupt Result becomes a throw.
  *
- * // PHASE2-INTERIM: removed in CS-4 — callers route through the pipeline
- * // (`projectSessionEntry`) instead once it lands.
+ * `participants` is always a required array in the returned shape (`[]` when
+ * none), never absent — callers that formerly received no `participants` key
+ * at all now receive `participants: []`.
  */
-export function parseSessionEntryJson(
-  row: { session_key?: string } & SessionEntryBlobRow,
-): SessionEntry | null {
-  const result = parseSessionEntryBlob(row.session_key ?? "unknown", row);
-  return result.ok ? result.entry : null;
+export function projectSessionEntry(
+  key: string,
+  row: SessionEntryBlobRow,
+  participants: readonly SessionParticipantRecord[] = [],
+): CanonicalSessionEntryShape {
+  const result = parseSessionEntryBlob(key, row, participants);
+  if (!result.ok) {
+    recordOpenClawSessionRowQuarantine({ sessionKey: key, reason: result.corrupt.reason });
+    throw result.corrupt;
+  }
+  return { participants: [], participantCount: 0, ...result.entry };
 }
 
 /**
- * Interim compatibility wrapper (Delta A, §14) for the participant-full,
- * throwing call sites that used to call the now-deleted
- * `parseReadableSqliteSessionEntryRow` (formerly
- * session-accessor.sqlite-entry-store.ts). On `{ ok: false }` it throws the
- * same `SessionCanonicalKeyMigrationRequiredError` as before, except the
- * `"{}"` blob + matching retained-window special case, which stays a silent
- * `null` — both branches preserved exactly from the deleted function.
- *
- * // PHASE2-INTERIM: removed in CS-4 — callers route through the pipeline
- * // (`projectSessionEntry`), which quarantines and throws
- * // `SessionRowCorruptError` at the boundary instead.
+ * Multi-row, silent-skip adapter over `projectSessionEntry` (Fable rule D):
+ * for a loop/map/reduce iterating many rows, a corrupt row must not abort
+ * the whole scan — quarantine happens (inside `projectSessionEntry`) and the
+ * corrupt row is skipped by returning `null`, matching the exact null-return
+ * contract every former `parseSessionEntryJson` multi-row call site already
+ * depended on. Any non-corrupt error still propagates.
  */
-export function parseReadableSqliteSessionEntryRow(
+export function readSessionEntryOrNull(
+  key: string,
+  row: SessionEntryBlobRow,
+  participants?: readonly SessionParticipantRecord[],
+): SessionEntry | null {
+  try {
+    return projectSessionEntry(key, row, participants);
+  } catch (error) {
+    if (!isSessionRowCorruptError(error)) {
+      throw error;
+    }
+    return null;
+  }
+}
+
+/**
+ * Former participant-full, throwing call sites (formerly
+ * `parseReadableSqliteSessionEntryRow`) route through this helper. It calls
+ * the one parser directly (not `projectSessionEntry`) so the `"{}"` blob +
+ * matching retained-window special case can be checked BEFORE deciding to
+ * quarantine — a retained window is a legitimate, non-corrupt state (the
+ * entry was cleared but the transcript generation survives), so it must
+ * stay a silent `null`, never a quarantine record. Every other corrupt case
+ * quarantines (§6) and throws the same `SessionCanonicalKeyMigrationRequiredError`
+ * message this call site always produced. On success, participants are
+ * layered on top exactly as the deleted function did (a second pass, not
+ * part of the parse), then the same post-parse canonical-key check runs.
+ */
+export function readCanonicalSqliteSessionEntryRow(
   database: Pick<OpenClawAgentDatabase, "db">,
   row: { current_session_id: string; session_key: string } & SessionEntryBlobRow,
 ): SessionEntry | null {
@@ -139,6 +175,10 @@ export function parseReadableSqliteSessionEntryRow(
   if (retainedWindow) {
     return null;
   }
+  recordOpenClawSessionRowQuarantine({
+    sessionKey: row.session_key,
+    reason: result.corrupt.reason,
+  });
   throw canonicalSessionKeyMigrationRequiredError(
     `invalid persisted session row requires repair for ${row.session_key}`,
   );

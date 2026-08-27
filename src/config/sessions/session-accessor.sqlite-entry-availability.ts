@@ -17,8 +17,11 @@ import {
   toDatabaseOptions,
   type SessionSqliteTargetResolutionCache,
 } from "./session-accessor.sqlite-scope.js";
-import { assertCanonicalSqliteSessionKeysCurrent } from "./session-canonical-key.js";
-import { parseReadableSqliteSessionEntryRow } from "./session-entry-parse.js";
+import {
+  assertCanonicalSqliteSessionKeysCurrent,
+  isCanonicalSessionKeyMigrationRequiredError,
+} from "./session-canonical-key.js";
+import { readCanonicalSqliteSessionEntryRow } from "./session-entry-parse.js";
 import type { SessionEntry } from "./types.js";
 
 export type SessionIdentityEvidenceResult =
@@ -150,10 +153,13 @@ function readSessionIdentityEvidenceRows(
     rowsBySessionId.set(row.current_session_id, rows);
     if (row.entry_valid === 1) {
       try {
-        if (parseReadableSqliteSessionEntryRow(database, row)) {
+        if (readCanonicalSqliteSessionEntryRow(database, row)) {
           readableKeys.add(row.session_key);
         }
-      } catch {
+      } catch (error) {
+        if (!isCanonicalSessionKeyMigrationRequiredError(error)) {
+          throw error;
+        }
         // A corrupt row must not make unrelated placements in this store indeterminate.
       }
     }
