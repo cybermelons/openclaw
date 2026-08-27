@@ -499,6 +499,8 @@ Use this EXACT format:
 ## Critical Context
 - [Any data, examples, or references needed to continue]
 - [Or "(none)" if not applicable]
+- The last thing the user requested and what was being done about it
+- Open referents currently in play: issue numbers, repo slugs/URLs, and the entity the user is discussing (e.g. what "it" or "the issue" refers to) — name them explicitly, do not leave them implicit
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
@@ -538,6 +540,8 @@ Use this EXACT format:
 
 ## Critical Context
 - [Preserve important context, add new if needed]
+- The last thing the user requested and what was being done about it (update if superseded by newer messages)
+- Open referents currently in play: issue numbers, repo slugs/URLs, and the entity the user is discussing (e.g. what "it" or "the issue" refers to) — name them explicitly, do not leave them implicit
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
