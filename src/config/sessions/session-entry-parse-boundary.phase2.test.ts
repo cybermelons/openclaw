@@ -60,6 +60,12 @@ const SESSION_ENTRY_PARSE_IMPORT_ALLOW_LIST = new Set([
   "config/sessions/session-accessor.sqlite-canonical-repair.ts",
   "config/sessions/session-accessor.sqlite-entry-cache.ts",
   "config/sessions/session-accessor.sqlite-entry-store.ts",
+  // Phase 3 CS-3 added a sanctioned blob re-verification here:
+  // hasSessionEntriesByStatusReadOnly projects each pre-narrowed row via
+  // projectSessionEntry and decides membership on the blob status, not the
+  // status COLUMN (§8c trap #1). That is exactly a blob reader, so this file
+  // is an allowed importer.
+  "config/sessions/session-accessor.sqlite-entry.ts",
   "config/sessions/session-accessor.sqlite-status.ts",
 ]);
 
@@ -265,4 +271,189 @@ describe("session-entry-parse boundary fence (Phase 2 CS-5, §7)", () => {
       expect(offenders).toStrictEqual([]);
     },
   );
+});
+
+// FENCE 3 (Phase 3 §6/§8, CS-5): a demoted-column FACT-READ outside the
+// writer allow-list fails lint. Phase 3 makes these columns write-only query
+// indexes (PHASE-3.md §1): logic must read entry_json via
+// projectSessionEntry, never a demoted column value as a fact. SQL may still
+// FILTER/SORT on them (class (a), §2.2) — that is the index job and stays
+// legal everywhere. What this fence blocks is a *named SELECT* of the
+// column's VALUE (`.select([...  "status" ...])` / `SELECT status` raw-SQL
+// style) in a file not on the allow-list below. `.selectAll()` and bare
+// WHERE/ORDER BY references are not matched — they don't name the column as
+// a picked-out value, and `.selectAll()` sites in this tree thread only the
+// blob-projected `entry` through call sites, not raw column values (verified
+// per site during Phase 3 CS-5 audit).
+describe("session-entry-parse boundary fence (Phase 3 CS-5, §6/§8) — FENCE 3: demoted-column fact-read", () => {
+  // The demoted columns (PHASE-3.md §6, CS-5 spec): their VALUE must never
+  // be read as a fact outside the writer/sanctioned allow-list below.
+  const DEMOTED_SESSION_NODES_COLUMNS = [
+    "status",
+    "archived_at",
+    "last_activity_at",
+    "parent_session_key",
+  ] as const;
+  const DEMOTED_SESSION_WINDOWS_COLUMNS = [
+    "status",
+    "display_name",
+    "parent_session_key",
+    "spawned_by",
+  ] as const;
+  const ALL_DEMOTED_COLUMNS = [
+    ...new Set([...DEMOTED_SESSION_NODES_COLUMNS, ...DEMOTED_SESSION_WINDOWS_COLUMNS]),
+  ];
+
+  const DEMOTED_COLUMN_PROJECTION_TABLES = ["session_nodes", "session_windows"] as const;
+
+  // Kysely-builder-style array select: `.select([..., "status", ...])` (also
+  // matches the single-column form `.select("status")`). Scoped to a
+  // `.selectFrom("session_nodes"|"session_windows")...select(...)` chain
+  // (a bounded window after the matching `.selectFrom(`) so an unrelated
+  // table's same-named column (e.g. a cron/task `status`) is not flagged —
+  // the same table-scoping discipline FENCE 1b uses.
+  function kyselySelectedDemotedColumns(source: string): Set<string> {
+    const found = new Set<string>();
+    const selectFromRe = new RegExp(
+      `\\.selectFrom\\("(${DEMOTED_COLUMN_PROJECTION_TABLES.join("|")})"\\)`,
+      "gu",
+    );
+    const selectCallRe = /\.select\(\s*(\[[^\]]*\]|"[^"]*"|'[^']*')\s*\)/gu;
+    for (const fromMatch of source.matchAll(selectFromRe)) {
+      const windowStart = fromMatch.index ?? 0;
+      // 2000 chars is generous headroom past chained .leftJoin/.innerJoin
+      // clauses (which can themselves span several lines) before the
+      // `.select(` call that follows a `.selectFrom(...)` chain — wide
+      // enough to reach the real select-array's closing `]` intact.
+      const window = source.slice(windowStart, windowStart + 2000);
+      selectCallRe.lastIndex = 0;
+      const selectMatch = selectCallRe.exec(window);
+      if (!selectMatch) {
+        continue;
+      }
+      for (const column of ALL_DEMOTED_COLUMNS) {
+        if (new RegExp(`["'](?:\\w+\\.)?${column}["']`, "u").test(selectMatch[1])) {
+          found.add(column);
+        }
+      }
+    }
+    return found;
+  }
+
+  // Raw-SQL style: `SELECT ... FROM session_nodes|session_windows`-shaped
+  // statements naming a demoted column in the column list (not inside a
+  // WHERE/ORDER BY clause, which is a separate, still-legal class (a)
+  // filter/sort use). Scoped to statements whose FROM target is one of the
+  // two demoted-column tables so an unrelated table's same-named column is
+  // not flagged.
+  function rawSqlSelectedDemotedColumns(source: string): Set<string> {
+    const found = new Set<string>();
+    const selectClauseRe = new RegExp(
+      `\\bSELECT\\b([^;]*?)\\bFROM\\b\\s+(${DEMOTED_COLUMN_PROJECTION_TABLES.join("|")})\\b`,
+      "giu",
+    );
+    for (const match of source.matchAll(selectClauseRe)) {
+      const columnList = match[1];
+      for (const column of ALL_DEMOTED_COLUMNS) {
+        if (new RegExp(`(^|[\\s,(])${column}([\\s,)]|$)`, "u").test(columnList)) {
+          found.add(column);
+        }
+      }
+    }
+    return found;
+  }
+
+  function demotedColumnFactReads(source: string): Set<string> {
+    return new Set([
+      ...kyselySelectedDemotedColumns(source),
+      ...rawSqlSelectedDemotedColumns(source),
+    ]);
+  }
+
+  // Allow-list seeded from the current tree (2026-08-27, pre-CS-5 landing).
+  // Every entry is a real, justified sanctioned site — not a Phase 3 leak:
+  const DEMOTED_COLUMN_FACT_READ_ALLOW_LIST = new Set([
+    // Note: the canonical writer, session-accessor.sqlite-session-row.ts,
+    // binds/writes these columns (INSERT/UPDATE) but never SELECTs them, so
+    // it is out of this fence's scope entirely and needs no allow-list
+    // entry — writes are the columns' whole job (PHASE-3.md §1) and this
+    // fence only flags SELECTs.
+    //
+    // Historical-generation reader (PHASE-3.md §5 CS-5 spec, documented
+    // carve-out): SELECTs parent_session_key + spawned_by from
+    // session_windows as generation/fork-lineage facts. This is the one
+    // sanctioned non-writer fact-read Phase 3 keeps.
+    "config/sessions/session-accessor.sqlite-history.ts",
+    // Doctor/repair tooling: bypasses the accessor layer by design (see
+    // FENCE 1b's non-config allow-list) to inspect and repair rows the
+    // accessor layer cannot. Selects session_windows.parent_session_key +
+    // spawned_by to rebuild incognito-key linkage during repair.
+    "commands/doctor-session-incognito-key-repair.ts",
+    // DB schema/migration + open-time validation ownership: reads
+    // session_nodes.parent_session_key/spawned_by (via a leftJoin select)
+    // as part of the canonical-key validation scan, not as
+    // business-logic facts about a session's current state.
+    "config/sessions/session-canonical-key.ts",
+  ]);
+
+  it("FENCE 3: no file outside the allow-list SELECTs a demoted column's value", async () => {
+    const all = await loadSources();
+    const offenders: string[] = [];
+    for (const { relative, source } of all) {
+      if (isTestSourceFile(relative) || DEMOTED_COLUMN_FACT_READ_ALLOW_LIST.has(relative)) {
+        continue;
+      }
+      if (demotedColumnFactReads(source).size > 0) {
+        offenders.push(relative);
+      }
+    }
+    expect(offenders).toStrictEqual([]);
+  });
+
+  it("FENCE 3: every seeded allow-list entry is still live (no stale entries)", async () => {
+    const all = await loadSources();
+    const bySource = new Map(all.map((entry) => [entry.relative, entry.source]));
+    for (const relative of DEMOTED_COLUMN_FACT_READ_ALLOW_LIST) {
+      const source = bySource.get(relative);
+      expect(source, `expected ${relative} to exist`).toBeDefined();
+      expect(
+        demotedColumnFactReads(source ?? "").size > 0,
+        `expected ${relative} to still SELECT a demoted column`,
+      ).toBe(true);
+    }
+  });
+
+  it("FENCE 3 BITE TEST: the detector flags a planted violation and does not flag the clean tree", () => {
+    const plantedViolationKysely = `
+      const rows = db
+        .selectFrom("session_nodes")
+        .select(["session_key", "status", "entry_json"])
+        .where("session_key", "=", key);
+    `;
+    expect(kyselySelectedDemotedColumns(plantedViolationKysely).has("status")).toBe(true);
+    expect(demotedColumnFactReads(plantedViolationKysely).has("status")).toBe(true);
+
+    const plantedViolationRawSql = `
+      const stmt = "SELECT session_key, archived_at, entry_json FROM session_nodes WHERE session_key = ?";
+    `;
+    expect(rawSqlSelectedDemotedColumns(plantedViolationRawSql).has("archived_at")).toBe(true);
+    expect(demotedColumnFactReads(plantedViolationRawSql).has("archived_at")).toBe(true);
+
+    // A legal class (a) filter/sort use — the column appears only in WHERE,
+    // never named in the SELECT list — must NOT be flagged.
+    const legalFilterOnly = `
+      const rows = db
+        .selectFrom("session_nodes")
+        .select(["session_key", "entry_json", "revision"])
+        .where("status", "in", ["running"])
+        .orderBy("archived_at", "desc");
+    `;
+    expect(demotedColumnFactReads(legalFilterOnly).size).toBe(0);
+
+    // .selectAll() must not be flagged (matches the real readExactSessionEntryRow shape).
+    const selectAllUse = `
+      const row = db.selectFrom("session_nodes").selectAll().where("session_key", "=", key);
+    `;
+    expect(demotedColumnFactReads(selectAllUse).size).toBe(0);
+  });
 });
