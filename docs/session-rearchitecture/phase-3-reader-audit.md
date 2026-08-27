@@ -471,3 +471,103 @@ context (see §1.1 scope note).
   UPDATE shares one transaction with its `entry_json` rewrite (§4);
   whether the canonical-repair window-copy path (§4) can run without
   rehoming the owning node's blob in the same transaction.
+
+---
+
+## 10. CS-2 Resolution (divergence traced to cause; no escalation)
+
+Method: census re-run on a read-only copy of the production store plus a
+per-row `current-generation vs stale-generation` and `column vs blob-key`
+diagnostic. All seven flagged (field,table) pairs are resolved. NO field has
+a two-writer value conflict (no `col=X blob=Y` with both non-null and
+different), so the one sanctioned Phase-3 stop (§2.4) is NOT triggered.
+
+### 10.1 session_windows fields — census artifacts, NOT backfill targets
+
+Every `session_windows` divergence is a comparison artifact of the census
+design (it compares each historical per-window row against the OWNING NODE's
+CURRENT blob), plus derived-column semantics. Diagnostic result:
+
+| Field              | current-gen divergent | stale-gen divergent | verdict                                                                                                                                                                                                                                                                                                                                        |
+| ------------------ | --------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| status             | 0                     | 44                  | 100% stale generation — old window rows keep their own write-time status; current window always matches blob. Artifact.                                                                                                                                                                                                                        |
+| parent_session_key | 0                     | 40                  | 100% stale generation. Artifact.                                                                                                                                                                                                                                                                                                               |
+| spawned_by         | 0                     | 12                  | 100% stale generation. Artifact.                                                                                                                                                                                                                                                                                                               |
+| display_name       | 73                    | 104                 | stale-gen = artifact; the 73 "current-gen" are the DERIVED column: `session_windows.display_name = displayName ?? label ?? subject ?? groupId` (`session-accessor.sqlite-session-row.ts:76,175-182`), while the census reads `entry.displayName` (often undefined when only `label` is set, e.g. node "main"). Derived index, not a blob twin. |
+
+Consequence: NO `session_windows` field is backfilled. These columns are
+column-derived / historical-generation stores with no authoritative blob
+value to route a reader to — the same structural category as `owner_*`
+(§7.1). They are the sanctioned column-primary exception for CS-6/CS-7.
+
+### 10.2 session_nodes fields
+
+| Field              | rows | class          | cause (file:line)                                                                                                                                                                                                                                                             | action                           |
+| ------------------ | ---- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| parent_session_key | 1    | (A) derived    | `bindSessionNode` `parent_session_key: normalizeText(entry.parentSessionKey) ?? spawnedBy` (`session-accessor.sqlite-session-row.ts:105`). The one divergent row has `col === spawned_by` exactly — the `?? spawnedBy` fallback, not a real divergence.                       | none (derived)                   |
+| archived_at        | 13   | (C) historical | Only writer is `writeSessionEntry` (blob+col atomic) + a one-time migration that reads FROM the blob. No live column-only writer. The 13 rows (all subagent/cron) have a column timestamp their blob's `archivedAt` key never carried — pre-dating reliable blob persistence. | BACKFILL blob-from-column (CS-2) |
+| last_activity_at   | 18   | (C) historical | Same: only `writeSessionEntry` writes it; the observer model (`session-observer.ts`) tracks it in-memory only, never a column-only DB write. The 18 rows (dashboard/ios/plugin) have a column value the blob key lacks.                                                       | BACKFILL blob-from-column (CS-2) |
+
+Defensive writer note: `updateSessionKeyColumns`
+(`doctor-session-incognito-key-repair.ts:304-307`) is a genuine class-(B)
+column-only UPDATE of `parent_session_key`/`spawned_by` on rename, but it
+produced ZERO current divergence (the single divergent node is the `??`
+fallback above, not a rename stale). CS-2 hardens/annotates it so future
+renames keep the blob consistent, but no row requires backfill for it.
+
+CS-2 backfill scope: 31 session_nodes rows (13 archived_at + 18
+last_activity_at). Idempotent, resumable, one-row CAS writes via
+`writeSessionEntry` (bumps revision). Proven to zero on a `/tmp` copy of the
+store; the LIVE backfill is a post-merge human step (§12).
+
+### 10.3 CS-2 oracle disposition
+
+The CS-2 equivalence oracle (`session-projection-equivalence.phase2.test.ts`)
+stays byte-identical: its fixtures are hand-built clean entries that do not
+reproduce the archived_at/last_activity_at historical divergence, so the
+pipeline output is unchanged. No oracle expectation edit and no oracle audit
+entry are needed (the sanctioned-exception path in §7 wall matrix is not
+exercised).
+
+---
+
+## 11. CS-6 Finding — the three deletion targets are LIVE, not dead
+
+PHASE-3.md §3 assumed the divergence check + `entry_valid` trigger guard "a
+state that can no longer occur" post-Phase-1. Verified against the tree, all
+THREE CS-6 deletion targets have irreducible LIVE consumers. Deleting them as
+specified is the §8(d) hazard (removing a guard that still has readers) — a
+regression, not a dead-code removal.
+
+1. **`parseSqliteSessionEntryRecord` (`session-entry-json.ts:12-36`) — LIVE.**
+   It IS the JSON-parse + identity-validation primitive the single canonical
+   parser is built on (`session-entry-parse.ts:74`, `parseSessionEntryBlob`),
+   plus two doctor write-safety gates
+   (`doctor-session-entry-rewrite.ts:23`, `doctor-session-delivery-state.ts:109,117`).
+   Deleting it breaks every session read.
+
+2. **`assertCanonicalSqliteSessionKeysCurrent` (`session-canonical-key.ts:124-224`)
+   — PARTIALLY live.** Lines ~159-187 (entry_valid + lineage-column-vs-blob
+   comparison) are the dead-after-reroute divergence portion; lines ~194-225
+   are a SEPARATE canonical-key-shape write-safety audit of persisted key
+   strings, independent of blob re-routing. All 6 call sites invoke the whole
+   function. Deleting the function wholesale removes the boot-time
+   non-canonical-persisted-key detection — a regression.
+
+3. **`entry_valid` triggers + compensating backfill
+   (`openclaw-agent-db-session-migrations.ts:304-341`) — LIVE.** `entry_valid`
+   has runtime readers driving availability/ownership decisions:
+   `sqlite-entry-availability.ts:154,169,186,189` (session availability
+   resolution), `sqlite-canonical-inventory.ts:162,200` (canonical-owner /
+   raw-fallback decisions), `session-canonical-key.ts:161,166`. Deleting the
+   triggers strands these readers on a never-updated flag.
+
+**CS-6 disposition (this landing):** CS-6 does NOT delete any of the three.
+The §3 premise is refuted by the tree. The safe, in-scope subset of CS-6 is
+empty of deletions given the current readers; the divergence-check + trigger
+removal is deferred and ESCALATED to the orchestrator with the reader
+evidence above. See PHASE-3-LANDING.md §CS-6 and §escalations. This is not a
+two-writer stop (§2.4) but a spec-vs-tree safety conflict: landing the
+specified deletions would regress availability logic. Per the landing
+contract (independent gate, no faked completion), CS-6 is reported blocked
+rather than forced.
