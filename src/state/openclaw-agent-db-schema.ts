@@ -46,6 +46,7 @@ import {
   backfillSessionConversations,
   ensureSessionProjectColumn,
   ensureSessionEntryValidityProjection,
+  ensureSessionResumeEpochSessionIdColumns,
   ensureSessionResumeEpochTable,
   ensureSessionRevisionColumn,
   migrateConversationDeliveryTargetColumn,
@@ -642,6 +643,7 @@ function ensureAgentSchema(
         ensureSessionEntryValidityProjection(db);
         ensureSessionRevisionColumn(db);
         ensureSessionResumeEpochTable(db);
+        ensureSessionResumeEpochSessionIdColumns(db);
         ensureSessionKeyContractSchemaInTransaction(db);
         if (hasPendingMemoryChunkMetadataMigration(db)) {
           migrateMemoryChunkMetadataSchema(db);
@@ -679,6 +681,7 @@ function ensureAgentSchema(
       ensureSessionEntryValidityProjection(db);
       ensureSessionRevisionColumn(db);
       ensureSessionResumeEpochTable(db);
+      ensureSessionResumeEpochSessionIdColumns(db);
       db.exec(OPENCLAW_AGENT_SCHEMA_SQL);
       migrateMemoryChunkMetadataSchema(db);
       if (previousVersion < targetVersion) {

@@ -1,7 +1,10 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupTempDirs, makeTempDir } from "../../../test/helpers/temp-dir.js";
-import { ensureSessionResumeEpochTable } from "../../state/openclaw-agent-db-session-migrations.js";
+import {
+  ensureSessionResumeEpochSessionIdColumns,
+  ensureSessionResumeEpochTable,
+} from "../../state/openclaw-agent-db-session-migrations.js";
 import {
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
@@ -61,10 +64,14 @@ describe("Phase-4 CS-2 session_resume_epoch marker (T-P4-CS2)", () => {
       sessionKey: "agent:main:alpha",
       epoch: 0,
       state: "drained",
+      sessionId: null,
+      drainedThroughSeq: null,
       updatedAt: expect.any(Number),
     });
     expect(beta?.epoch).toBe(0);
     expect(beta?.state).toBe("drained");
+    expect(beta?.sessionId).toBeNull();
+    expect(beta?.drainedThroughSeq).toBeNull();
   });
 
   it("write API upserts epoch and state", async () => {
@@ -79,10 +86,14 @@ describe("Phase-4 CS-2 session_resume_epoch marker (T-P4-CS2)", () => {
       sessionKey: "agent:main:gamma",
       epoch: 1,
       state: "drain_pending",
+      sessionId: "gamma-session",
+      drainedThroughSeq: null,
     });
     expect(readSessionResumeEpoch(database, "agent:main:gamma")).toMatchObject({
       epoch: 1,
       state: "drain_pending",
+      sessionId: "gamma-session",
+      drainedThroughSeq: null,
     });
 
     // Upsert again — same key, advance epoch and flip to drained.
@@ -90,10 +101,14 @@ describe("Phase-4 CS-2 session_resume_epoch marker (T-P4-CS2)", () => {
       sessionKey: "agent:main:gamma",
       epoch: 2,
       state: "drained",
+      sessionId: "gamma-session",
+      drainedThroughSeq: 7,
     });
     expect(readSessionResumeEpoch(database, "agent:main:gamma")).toMatchObject({
       epoch: 2,
       state: "drained",
+      sessionId: "gamma-session",
+      drainedThroughSeq: 7,
     });
   });
 
@@ -110,6 +125,8 @@ describe("Phase-4 CS-2 session_resume_epoch marker (T-P4-CS2)", () => {
       sessionKey: "agent:main:delta",
       epoch: 5,
       state: "drain_pending",
+      sessionId: "delta-session",
+      drainedThroughSeq: 3,
     });
     ensureSessionResumeEpochTable(database.db);
     ensureSessionResumeEpochTable(database.db);
@@ -117,6 +134,43 @@ describe("Phase-4 CS-2 session_resume_epoch marker (T-P4-CS2)", () => {
     expect(readSessionResumeEpoch(database, "agent:main:delta")).toMatchObject({
       epoch: 5,
       state: "drain_pending",
+      sessionId: "delta-session",
+      drainedThroughSeq: 3,
+    });
+  });
+
+  it("session_id/drained_through_seq columns fold in additively: pre-fold-in rows read back null, trigger still writes (epoch=0, drained, NULL, NULL)", async () => {
+    await upsertSessionEntryCore(
+      { sessionKey: "agent:main:epsilon", storePath },
+      { sessionId: "epsilon-session", updatedAt: 60 },
+    );
+    const database = openDatabase();
+
+    // Column-add migration is idempotent — re-running never disturbs the row.
+    ensureSessionResumeEpochSessionIdColumns(database.db);
+    ensureSessionResumeEpochSessionIdColumns(database.db);
+
+    const epsilon = readSessionResumeEpoch(database, "agent:main:epsilon");
+    expect(epsilon).toMatchObject({
+      epoch: 0,
+      state: "drained",
+      sessionId: null,
+      drainedThroughSeq: null,
+    });
+
+    // The AFTER-INSERT trigger (unchanged, names columns explicitly) still
+    // produces a fresh (epoch=0, drained, NULL, NULL) row for a new session
+    // created after the column fold-in.
+    await upsertSessionEntryCore(
+      { sessionKey: "agent:main:zeta", storePath },
+      { sessionId: "zeta-session", updatedAt: 70 },
+    );
+    const zeta = readSessionResumeEpoch(database, "agent:main:zeta");
+    expect(zeta).toMatchObject({
+      epoch: 0,
+      state: "drained",
+      sessionId: null,
+      drainedThroughSeq: null,
     });
   });
 

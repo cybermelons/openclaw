@@ -368,6 +368,25 @@ export async function drainTailForResume(
   let backfilled = 0;
   let epoch = 0;
   await runExclusiveSqliteSessionWrite(resolved, async () => {
+    // Phase 1: mark drain_pending BEFORE the drain commits, in its own
+    // transaction, so a crash between phase 1 and phase 2 leaves a durably
+    // committed drain_pending row for the CS-4 reader to refuse on — the
+    // refusal guard is unreachable in production unless this phase commits
+    // on its own first. Epoch is NOT incremented here (still the prior,
+    // fully-drained epoch); only phase 2's commit advances it.
+    runOpenClawAgentWriteTransaction((database) => {
+      const current = readSessionResumeEpoch(database, params.sessionKey);
+      writeSessionResumeEpoch(database, {
+        sessionKey: params.sessionKey,
+        epoch: current?.epoch ?? 0,
+        state: "drain_pending",
+        sessionId: params.entry.sessionId,
+        drainedThroughSeq: current?.drainedThroughSeq ?? null,
+      });
+    }, toDatabaseOptions(resolved));
+
+    // Phase 2: append the drained tail and commit the drained marker in the
+    // SAME transaction (PHASE-4.md §4 CS-3) — drain + marker stay atomic.
     runOpenClawAgentWriteTransaction((database) => {
       const transcriptScope = { ...resolved, sessionId: params.entry.sessionId };
       for (const message of candidates) {
@@ -388,10 +407,21 @@ export async function drainTailForResume(
       params.failureHookAfterAppends?.();
       const current = readSessionResumeEpoch(database, params.sessionKey);
       epoch = (current?.epoch ?? 0) + 1;
+      const seqRow = database.db
+        .prepare("SELECT MAX(seq) AS max_seq FROM transcript_events WHERE session_id = ?")
+        .get(params.entry.sessionId) as { max_seq?: unknown } | undefined;
+      const drainedThroughSeq =
+        typeof seqRow?.max_seq === "number"
+          ? seqRow.max_seq
+          : seqRow?.max_seq === null || seqRow?.max_seq === undefined
+            ? null
+            : Number(seqRow.max_seq);
       writeSessionResumeEpoch(database, {
         sessionKey: params.sessionKey,
         epoch,
         state: "drained",
+        sessionId: params.entry.sessionId,
+        drainedThroughSeq,
       });
     }, toDatabaseOptions(resolved));
   });

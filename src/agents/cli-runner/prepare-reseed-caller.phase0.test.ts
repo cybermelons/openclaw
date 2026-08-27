@@ -98,7 +98,7 @@ function seedResumeEpochMarker(params: {
   state: "drain_pending" | "drained";
 }): void {
   const database = openOpenClawAgentDatabase({ agentId: "main" });
-  writeSessionResumeEpoch(database, params);
+  writeSessionResumeEpoch(database, { ...params, sessionId: null, drainedThroughSeq: null });
 }
 
 describe("prepareCliRunContext caller-side reseed reason (phase0)", () => {

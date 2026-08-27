@@ -5,12 +5,17 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { SessionEntry } from "../config/sessions.js";
-import { readSessionResumeEpoch } from "../config/sessions/session-accessor.sqlite-resume-epoch-store.js";
+import { readSessionResumeEpochForScope } from "../config/sessions/session-accessor.sqlite-active-projection.js";
+import {
+  readSessionResumeEpoch,
+  writeSessionResumeEpoch,
+} from "../config/sessions/session-accessor.sqlite-resume-epoch-store.js";
 import {
   resolveSqliteScope,
   toDatabaseOptions,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
 import { appendTranscriptMessageInTransaction } from "../config/sessions/session-accessor.sqlite-transcript-message-append.js";
+import { SessionResumeDrainPendingError } from "../config/sessions/session-resume-drain-pending-error.js";
 import { CLAUDE_CLI_PROVIDER } from "../gateway/cli-session-history.claude.js";
 import {
   closeOpenClawAgentDatabasesForTest,
@@ -19,6 +24,7 @@ import {
 } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { withEnvAsync } from "../test-utils/env.js";
+import { loadCliSessionContextEngineMessages } from "./cli-runner/session-history.js";
 import { setCliSessionBinding } from "./cli-session.js";
 import { drainTailForResume, reconcileCliTranscript } from "./cli-transcript-reconcile.js";
 
@@ -417,7 +423,7 @@ describe("drainTailForResume", () => {
     );
   });
 
-  it("rolls back appended rows and the marker together when the post-append hook throws", async () => {
+  it("rolls back appended rows and the drained-marker write together when the post-append hook throws, but leaves the phase-1 drain_pending commit in place (CS-4 guard reachable)", async () => {
     await withClaudeProjectsDir(
       [
         { role: "user", uuid: "user-1", content: "hello" },
@@ -457,10 +463,14 @@ describe("drainTailForResume", () => {
           }),
         ).rejects.toThrow(failure);
 
-        // No marker row exists yet for this session (the transaction that
-        // would have created it via the session_nodes insert trigger rolled
-        // back), and no transcript rows were appended.
-        expect(readEpochMarker({ agentId: "main", env, sessionKey })).toBeNull();
+        // Phase 1 (drain_pending) is a separate, already-committed transaction:
+        // it survives phase 2's rollback. This is the durably-committed
+        // drain_pending row the CS-4 refusal guard reads in production.
+        const marker = readEpochMarker({ agentId: "main", env, sessionKey });
+        expect(marker).toMatchObject({ epoch: 0, state: "drain_pending" });
+
+        // Phase 2 (append + drained-marker write) rolled back together: no
+        // transcript rows were appended.
         const count = countTranscriptMessageEvents({
           agentId: "main",
           env,
@@ -469,5 +479,258 @@ describe("drainTailForResume", () => {
         expect(count).toBe(0);
       },
     );
+  });
+
+  it("CS-4 guard is reachable: loadCliSessionContextEngineMessages throws SessionResumeDrainPendingError on the durably-committed phase-1 drain_pending row after a phase-2 crash, then clears on re-entry with epoch advanced exactly once and no duplicate rows", async () => {
+    await withClaudeProjectsDir(
+      [
+        { role: "user", uuid: "user-1", content: "hello" },
+        { role: "assistant", uuid: "assistant-1", content: "hi there" },
+      ],
+      async ({ homeDir, sessionId }) => {
+        const entry: SessionEntry = {
+          sessionId: "openclaw-local-session-drain-guard",
+          updatedAt: Date.now(),
+        };
+        setCliSessionBinding(entry, CLAUDE_CLI_PROVIDER, { sessionId });
+        const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+        const sessionKey = "agent:main:openclaw-local-session-drain-guard";
+
+        // A minimal OpenClaw session envelope (independent of the CLI jsonl
+        // above) — the guard reads the marker before touching this file, so
+        // its content only needs to be valid enough for the eventual
+        // post-guard read to succeed.
+        const sessionFile = path.join(stateDir, "openclaw-local-session-drain-guard.jsonl");
+        await fs.writeFile(
+          sessionFile,
+          `${JSON.stringify({
+            type: "session",
+            version: "1",
+            id: entry.sessionId,
+            timestamp: new Date(0).toISOString(),
+            cwd: stateDir,
+          })}\n${JSON.stringify({
+            type: "message",
+            id: "msg-0",
+            parentId: null,
+            timestamp: new Date(1).toISOString(),
+            message: { role: "user", content: "hi", timestamp: 1 },
+          })}\n`,
+          "utf-8",
+        );
+
+        const failure = new Error("simulated crash after phase 1, during phase 2");
+        await expect(
+          drainTailForResume({
+            entry,
+            sessionKey,
+            agentId: "main",
+            env,
+            homeDir,
+            failureHookAfterAppends: () => {
+              throw failure;
+            },
+          }),
+        ).rejects.toThrow(failure);
+
+        await withEnvAsync(env, async () => {
+          let thrown: unknown;
+          try {
+            await loadCliSessionContextEngineMessages({
+              sessionId: entry.sessionId,
+              sessionFile,
+              sessionKey,
+              agentId: "main",
+            });
+          } catch (error) {
+            thrown = error;
+          }
+          expect(thrown).toBeInstanceOf(SessionResumeDrainPendingError);
+
+          // Re-entry: drain to completion. Guard clears; epoch advanced
+          // exactly once relative to pre-crash (0 -> 1, not 0 -> 2); no
+          // duplicate rows (idempotent append dedups on eventId).
+          const result = await drainTailForResume({
+            entry,
+            sessionKey,
+            agentId: "main",
+            env,
+            homeDir,
+          });
+          expect(result).toEqual({ backfilled: 2, epoch: 1 });
+
+          const messages = await loadCliSessionContextEngineMessages({
+            sessionId: entry.sessionId,
+            sessionFile,
+            sessionKey,
+            agentId: "main",
+          });
+          expect(messages.length).toBeGreaterThan(0);
+        });
+
+        const count = countTranscriptMessageEvents({
+          agentId: "main",
+          env,
+          sessionId: entry.sessionId,
+        });
+        expect(count).toBe(2);
+      },
+    );
+  });
+
+  it("watermark: after a completed drain, the marker names the drained session_id and drainedThroughSeq = MAX(seq) for it", async () => {
+    await withClaudeProjectsDir(
+      [
+        { role: "user", uuid: "user-1", content: "hello" },
+        { role: "assistant", uuid: "assistant-1", content: "hi there" },
+      ],
+      async ({ homeDir, sessionId }) => {
+        const entry: SessionEntry = {
+          sessionId: "openclaw-local-session-drain-watermark",
+          updatedAt: Date.now(),
+        };
+        setCliSessionBinding(entry, CLAUDE_CLI_PROVIDER, { sessionId });
+        const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+        const sessionKey = "agent:main:openclaw-local-session-drain-watermark";
+
+        const result = await drainTailForResume({
+          entry,
+          sessionKey,
+          agentId: "main",
+          env,
+          homeDir,
+        });
+        expect(result).toEqual({ backfilled: 2, epoch: 1 });
+
+        const database = openOpenClawAgentDatabase({ agentId: "main", env });
+        const marker = readSessionResumeEpoch(database, sessionKey);
+        expect(marker).toMatchObject({
+          epoch: 1,
+          state: "drained",
+          sessionId: entry.sessionId,
+        });
+        expect(marker?.drainedThroughSeq).not.toBeNull();
+
+        const maxSeqRow = database.db
+          .prepare("SELECT MAX(seq) AS max_seq FROM transcript_events WHERE session_id = ?")
+          .get(entry.sessionId) as { max_seq?: unknown };
+        expect(marker?.drainedThroughSeq).toBe(maxSeqRow.max_seq);
+
+        const seqRows = database.db
+          .prepare(
+            "SELECT seq FROM transcript_events WHERE session_id = ? AND json_extract(event_json, '$.type') = 'message'",
+          )
+          .all(entry.sessionId) as Array<{ seq: number }>;
+        expect(seqRows.length).toBe(2);
+        const epoch = marker?.epoch;
+        const drainedThroughSeq = marker?.drainedThroughSeq;
+
+        // Predicate true for a drained event.
+        const predicate = (
+          candidateSessionId: string,
+          candidateSeq: number,
+          candidateEpoch: number,
+        ) =>
+          candidateEpoch === epoch &&
+          candidateSessionId === entry.sessionId &&
+          drainedThroughSeq !== null &&
+          candidateSeq <= (drainedThroughSeq as number);
+
+        for (const row of seqRows) {
+          expect(predicate(entry.sessionId, row.seq, epoch as number)).toBe(true);
+        }
+        // False for a higher seq.
+        expect(predicate(entry.sessionId, (drainedThroughSeq as number) + 1, epoch as number)).toBe(
+          false,
+        );
+        // False for a different session_id.
+        expect(predicate("some-other-session-id", seqRows[0]!.seq, epoch as number)).toBe(false);
+        // False for a different epoch.
+        expect(predicate(entry.sessionId, seqRows[0]!.seq, (epoch as number) + 1)).toBe(false);
+      },
+    );
+  });
+
+  it("rollover: two drains with the same session_key but different session_ids leave the marker naming the second session_id + its watermark, epoch bumped twice", async () => {
+    await withClaudeProjectsDir(
+      [{ role: "user", uuid: "user-1", content: "first window" }],
+      async ({ homeDir, sessionId: firstCliSessionId }) => {
+        const sessionKey = "agent:main:openclaw-local-session-drain-rollover";
+        const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+
+        const firstEntry: SessionEntry = {
+          sessionId: "openclaw-local-session-drain-rollover-a",
+          updatedAt: Date.now(),
+        };
+        setCliSessionBinding(firstEntry, CLAUDE_CLI_PROVIDER, { sessionId: firstCliSessionId });
+        const firstResult = await drainTailForResume({
+          entry: firstEntry,
+          sessionKey,
+          agentId: "main",
+          env,
+          homeDir,
+        });
+        expect(firstResult).toEqual({ backfilled: 1, epoch: 1 });
+
+        const database = openOpenClawAgentDatabase({ agentId: "main", env });
+        const afterFirst = readSessionResumeEpoch(database, sessionKey);
+        expect(afterFirst).toMatchObject({
+          epoch: 1,
+          state: "drained",
+          sessionId: firstEntry.sessionId,
+        });
+
+        // Second window: a new transcript session_id under the same session_key.
+        const secondEntry: SessionEntry = {
+          sessionId: "openclaw-local-session-drain-rollover-b",
+          updatedAt: Date.now(),
+        };
+        setCliSessionBinding(secondEntry, CLAUDE_CLI_PROVIDER, { sessionId: firstCliSessionId });
+        const secondResult = await drainTailForResume({
+          entry: secondEntry,
+          sessionKey,
+          agentId: "main",
+          env,
+          homeDir,
+        });
+        expect(secondResult.epoch).toBe(2);
+
+        const afterSecond = readSessionResumeEpoch(database, sessionKey);
+        expect(afterSecond).toMatchObject({
+          epoch: 2,
+          state: "drained",
+          sessionId: secondEntry.sessionId,
+        });
+        expect(afterSecond?.drainedThroughSeq).not.toBeNull();
+      },
+    );
+  });
+
+  it("NULL tolerance: state='drained' with NULL sessionId/drainedThroughSeq (pre-fold-in row) resumes without refusal", async () => {
+    const sessionKey = "agent:main:openclaw-local-session-drain-null-tolerance";
+    const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+    const entry: SessionEntry = {
+      sessionId: "openclaw-local-session-drain-null-tolerance",
+      updatedAt: Date.now(),
+    };
+
+    // Materialize a marker row via a no-op drain, then rewrite it to the
+    // pre-fold-in shape (drained, NULL sessionId, NULL drainedThroughSeq).
+    await drainTailForResume({ entry, sessionKey, agentId: "main", env });
+    const database = openOpenClawAgentDatabase({ agentId: "main", env });
+    writeSessionResumeEpoch(database, {
+      sessionKey,
+      epoch: 1,
+      state: "drained",
+      sessionId: null,
+      drainedThroughSeq: null,
+    });
+
+    const scope = resolveSqliteScope({ agentId: "main", env, sessionKey });
+    const resumed = readSessionResumeEpochForScope(
+      { ...scope, sessionId: entry.sessionId },
+      sessionKey,
+    );
+    expect(resumed).toMatchObject({ state: "drained", sessionId: null, drainedThroughSeq: null });
   });
 });

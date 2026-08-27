@@ -79,6 +79,8 @@ function setResumeEpochMarker(params: {
     sessionKey: params.sessionKey,
     epoch: params.epoch,
     state: params.state,
+    sessionId: null,
+    drainedThroughSeq: null,
   });
 }
 

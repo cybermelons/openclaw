@@ -26,6 +26,13 @@ import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
  * As of CS-3/CS-4 `readSessionResumeEpoch` IS on the resume/dispatch path (via
  * `readSessionResumeEpochForScope` in the history reader). Writes join the drain
  * transaction in CS-3 so drain + marker commit atomically (§3 boundary).
+ *
+ * The row also carries `sessionId` + `drainedThroughSeq`, folding in the
+ * transcript identity `(session_id, seq)`: `drainedThroughSeq` is the
+ * watermark `MAX(seq) FROM transcript_events WHERE session_id = sessionId`
+ * as of this epoch. Both are nullable (pre-fold-in rows, and phase-1
+ * `drain_pending` writes before the watermark is known) and are never
+ * consulted for the CS-4 refusal decision — that decision is `state` alone.
  */
 
 export type SessionResumeEpochState = "drain_pending" | "drained";
@@ -35,6 +42,10 @@ export type SessionResumeEpochRow = {
   epoch: number;
   state: SessionResumeEpochState;
   updatedAt: number;
+  /** Transcript session this epoch's marker names (part of the `(session_id, seq)` transcript key). Null on rows never written under the two-column fold-in. */
+  sessionId: string | null;
+  /** Watermark `seq` (MAX(seq) FROM transcript_events for `sessionId`) drained as of this epoch. Null when unknown/never drained under the fold-in. */
+  drainedThroughSeq: number | null;
 };
 
 /**
@@ -45,20 +56,35 @@ export type SessionResumeEpochRow = {
  */
 export function writeSessionResumeEpoch(
   database: OpenClawAgentDatabase,
-  params: { sessionKey: string; epoch: number; state: SessionResumeEpochState },
+  params: {
+    sessionKey: string;
+    epoch: number;
+    state: SessionResumeEpochState;
+    sessionId: string | null;
+    drainedThroughSeq: number | null;
+  },
 ): void {
   database.db
     .prepare(
       `
-      INSERT INTO session_resume_epoch (session_key, epoch, state, updated_at)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO session_resume_epoch (session_key, epoch, state, session_id, drained_through_seq, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_key) DO UPDATE SET
         epoch = excluded.epoch,
         state = excluded.state,
+        session_id = excluded.session_id,
+        drained_through_seq = excluded.drained_through_seq,
         updated_at = excluded.updated_at
     `,
     )
-    .run(params.sessionKey, params.epoch, params.state, Date.now());
+    .run(
+      params.sessionKey,
+      params.epoch,
+      params.state,
+      params.sessionId,
+      params.drainedThroughSeq,
+      Date.now(),
+    );
 }
 
 /**
@@ -75,10 +101,17 @@ export function readSessionResumeEpoch(
 ): SessionResumeEpochRow | null {
   const row = database.db
     .prepare(
-      "SELECT session_key, epoch, state, updated_at FROM session_resume_epoch WHERE session_key = ?",
+      "SELECT session_key, epoch, state, session_id, drained_through_seq, updated_at FROM session_resume_epoch WHERE session_key = ?",
     )
     .get(sessionKey) as
-    | { session_key?: unknown; epoch?: unknown; state?: unknown; updated_at?: unknown }
+    | {
+        session_key?: unknown;
+        epoch?: unknown;
+        state?: unknown;
+        session_id?: unknown;
+        drained_through_seq?: unknown;
+        updated_at?: unknown;
+      }
     | undefined;
   if (!row || typeof row.session_key !== "string") {
     return null;
@@ -91,6 +124,13 @@ export function readSessionResumeEpoch(
     sessionKey: row.session_key,
     epoch: typeof row.epoch === "number" ? row.epoch : Number(row.epoch),
     state,
+    sessionId: typeof row.session_id === "string" ? row.session_id : null,
+    drainedThroughSeq:
+      typeof row.drained_through_seq === "number"
+        ? row.drained_through_seq
+        : row.drained_through_seq === null || row.drained_through_seq === undefined
+          ? null
+          : Number(row.drained_through_seq),
     updatedAt: typeof row.updated_at === "number" ? row.updated_at : Number(row.updated_at),
   };
 }

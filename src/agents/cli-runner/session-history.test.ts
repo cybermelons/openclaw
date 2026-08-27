@@ -136,7 +136,13 @@ async function withCliSessionState<T>(stateDir: string, run: () => Promise<T>): 
 // marker directly for their session key, mirroring CS-3's drain path.
 function seedDrainedResumeEpochMarker(params: { agentId?: string; sessionKey: string }): void {
   const database = openOpenClawAgentDatabase({ agentId: params.agentId ?? "main" });
-  writeSessionResumeEpoch(database, { sessionKey: params.sessionKey, epoch: 0, state: "drained" });
+  writeSessionResumeEpoch(database, {
+    sessionKey: params.sessionKey,
+    epoch: 0,
+    state: "drained",
+    sessionId: null,
+    drainedThroughSeq: null,
+  });
 }
 
 describe("loadCliSessionHistoryMessages", () => {

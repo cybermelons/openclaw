@@ -391,6 +391,29 @@ export function ensureSessionResumeEpochTable(db: DatabaseSync): void {
   `);
 }
 
+/**
+ * Folds the transcript identity `(session_id, seq)` into the resume-epoch
+ * marker (PHASE-4.md §3a follow-up): adds `session_id` and
+ * `drained_through_seq` columns so the marker can name the exact drained
+ * window without a second lookup. Additive only — no table rebuild, no row
+ * rewrite. Existing rows (and the unchanged backfill/trigger, which name
+ * columns explicitly) read the two new columns back as NULL. Idempotent:
+ * `readSqliteTableColumns` gates each ALTER so re-running never re-adds a
+ * column.
+ */
+export function ensureSessionResumeEpochSessionIdColumns(db: DatabaseSync): void {
+  const columns = readSqliteTableColumns(db, "session_resume_epoch");
+  if (!columns) {
+    return;
+  }
+  if (!columns.has("session_id")) {
+    db.exec("ALTER TABLE session_resume_epoch ADD COLUMN session_id TEXT");
+  }
+  if (!columns.has("drained_through_seq")) {
+    db.exec("ALTER TABLE session_resume_epoch ADD COLUMN drained_through_seq INTEGER");
+  }
+}
+
 export function migrateSessionEntryStatusProjection(
   db: DatabaseSync,
   readStatus: (entryJson: unknown) => string | null,
