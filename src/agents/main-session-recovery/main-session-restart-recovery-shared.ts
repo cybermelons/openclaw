@@ -17,6 +17,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   isOpenClawDatabaseCorruptMarker,
   readOpenClawDatabaseQuarantine,
+  readOpenClawSessionRowQuarantine,
 } from "../../state/openclaw-quarantine-store.js";
 import { resolveAgentSessionDirs } from "../session-dirs.js";
 
@@ -98,6 +99,20 @@ export function isSessionRecoveryStorePathQuarantined(
   const sqliteTarget = resolveUnsuffixedSqliteTargetFromSessionStorePath(storePath);
   const quarantine = readOpenClawDatabaseQuarantine(sqliteTarget.path, { env });
   return isOpenClawDatabaseCorruptMarker(quarantine);
+}
+
+/**
+ * PHASE-2.md §6: sibling of `isSessionRecoveryStorePathQuarantined` for the
+ * row-level ledger key space. A row-quarantined session must never be
+ * re-resumed, exactly like a DB-quarantined store — the skip guards consult
+ * both at the same point (`dbMarked(key) || rowMarked(key)`). Read-only; no
+ * caller writes a row marker until CS-4b.
+ */
+export function isSessionRecoveryRowQuarantined(
+  sessionKey: string,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return readOpenClawSessionRowQuarantine(sessionKey, { env }) !== undefined;
 }
 
 export async function resolveRestartRecoveryStorePaths(params: {

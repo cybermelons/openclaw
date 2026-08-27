@@ -15,6 +15,7 @@ import {
   DEFAULT_RECOVERY_DELAY_MS,
   type ExhaustedRestartRecoveryTarget,
   type ExpectedRestartRecoveryTarget,
+  isSessionRecoveryRowQuarantined,
   isSessionRecoveryStorePathQuarantined,
   mainSessionRecoveryLog,
   MAX_RECOVERY_RETRIES,
@@ -157,7 +158,13 @@ async function recoverExpectedRestartRecovery(params: {
     params.stateDir === undefined
       ? process.env
       : { ...process.env, OPENCLAW_STATE_DIR: params.stateDir };
-  if (isSessionRecoveryStorePathQuarantined(params.storePath, recoveryEnv)) {
+  // PHASE-2.md §6: a row-level marker must gate a targeted retry exactly like
+  // a DB-level marker — same predicate, same point, extended for the
+  // sessionKey key space (dbMarked(key) || rowMarked(key)).
+  if (
+    isSessionRecoveryStorePathQuarantined(params.storePath, recoveryEnv) ||
+    isSessionRecoveryRowQuarantined(params.sessionKey, recoveryEnv)
+  ) {
     return { recovered: 0, failed: 0, skipped: 1 };
   }
   const loadExpected = () =>

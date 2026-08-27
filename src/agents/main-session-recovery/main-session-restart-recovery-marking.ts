@@ -23,6 +23,7 @@ import {
 } from "./main-session-recovery-state.js";
 import {
   hasCurrentProcessOwner,
+  isSessionRecoveryRowQuarantined,
   isSessionRecoveryStorePathQuarantined,
   mainSessionRecoveryLog,
   normalizeFiniteTimestamp,
@@ -164,6 +165,12 @@ export async function markRestartAbortedMainSessions(params: {
     const storeResult = await markRecoveryStore({
       storePath,
       plan: (entry, sessionKey) => {
+        // PHASE-2.md §6: a row-quarantined session must never be re-resumed,
+        // exactly like a DB-quarantined store. Same predicate, same point as
+        // the DB-level check above, extended for the sessionKey key space.
+        if (isSessionRecoveryRowQuarantined(sessionKey, env)) {
+          return undefined;
+        }
         const registeredActiveRuns = listAgentRunsForSession({
           sessionKey,
           sessionId: entry.sessionId,
@@ -242,6 +249,10 @@ export async function markStartupOrphanedMainSessionsForRecovery(params: {
     providedActiveSessionIds ?? normalizeStringSet(listActiveEmbeddedRunSessionIds());
   const resolveActiveSessionKeys = () =>
     providedActiveSessionKeys ?? normalizeStringSet(listActiveEmbeddedRunSessionKeys());
+  const env =
+    params.stateDir === undefined
+      ? process.env
+      : { ...process.env, OPENCLAW_STATE_DIR: params.stateDir };
 
   for (const storePath of await resolveRestartRecoveryStorePaths(params)) {
     const storeResult = await markRecoveryStore({
@@ -249,6 +260,13 @@ export async function markStartupOrphanedMainSessionsForRecovery(params: {
       statuses: ["running"],
       plan: (entry, sessionKey) => {
         if (entry.status !== "running" || entry.abortedLastRun === true) {
+          return undefined;
+        }
+        // PHASE-2.md §6: honor a row-level quarantine marker at the same
+        // point the DB-level marker already gates this store (via
+        // resolveRestartRecoveryStorePaths above) — a row-quarantined
+        // session must never be re-marked/re-resumed.
+        if (isSessionRecoveryRowQuarantined(sessionKey, env)) {
           return undefined;
         }
         const updatedAt = normalizeFiniteTimestamp(entry.updatedAt);
