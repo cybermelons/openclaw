@@ -13,6 +13,7 @@ import type {
   MaterializedSessionStateDeletePlan,
   SessionStateDeletePlan,
 } from "./session-accessor.sqlite-archive.js";
+import { readExactSessionEntryRowForCanonicalRepair } from "./session-accessor.sqlite-canonical-repair.js";
 import type {
   SessionEntryLifecycleRemoval,
   SessionEntryLifecycleUpsert,
@@ -349,7 +350,13 @@ export async function projectSessionEntryLifecycleMutation(
     if (!key) {
       continue;
     }
-    const revision = readExactSessionEntryRow(database, key)?.row.revision;
+    const revision = (
+      params.allowCanonicalRepair === true
+        ? readExactSessionEntryRowForCanonicalRepair(database, key, {
+            allowMalformedRowRepair: true,
+          })
+        : readExactSessionEntryRow(database, key)
+    )?.row.revision;
     if (revision !== undefined) {
       revisionAtSnapshot.set(key, revision);
     }
@@ -396,7 +403,16 @@ export async function projectSessionEntryLifecycleMutation(
     }
     projectedRemovals.push({
       expectedEntry: cloneSessionEntry(entry),
-      expectedRevision: revisionAtSnapshot.get(sessionKey) ?? -1,
+      // Raw-JSON-doctor-path removals are validated by the doctor-repair
+      // JSON string compare above; the commit-phase re-read
+      // (`readProjectedRemovalCurrentRevision`) always reports the sentinel
+      // -1 for these, so the snapshot side must match that sentinel rather
+      // than the row's real revision, or a legitimate repair removal
+      // false-conflicts (0 !== -1) even though nothing raced it.
+      expectedRevision:
+        removal.expectedRawEntryJson !== undefined
+          ? -1
+          : (revisionAtSnapshot.get(sessionKey) ?? -1),
       removal,
       sessionKey,
     });
@@ -410,6 +426,15 @@ export async function projectSessionEntryLifecycleMutation(
     changedSessionKeys.add(sessionKey);
     delete store[sessionKey];
   }
+  // Session keys with a raw-JSON-doctor-path removal targeting them (see the
+  // `expectedRevision` comment below): needed so a same-key upsert (rewriting
+  // a malformed row in place) also compares against the commit-phase sentinel
+  // instead of the row's real revision.
+  const rawEntryJsonRemovalKeys = new Set(
+    params.removals
+      .filter((removal) => removal.expectedRawEntryJson !== undefined)
+      .map((removal) => (removal.exactStoredKey ? removal.sessionKey : removal.sessionKey.trim())),
+  );
   const upsertedEntries: ProjectedLifecycleMutation["upsertedEntries"] = [];
   for (const upsert of params.upserts) {
     const sessionKey = upsert.sessionKey.trim();
@@ -445,7 +470,14 @@ export async function projectSessionEntryLifecycleMutation(
         : undefined;
     upsertedEntries.push({
       expectedEntry,
-      expectedRevision: revisionAtSnapshot.get(sessionKey) ?? -1,
+      // Same-key raw-JSON-doctor-path rewrite (removal + upsert target the
+      // same malformed row): the commit-phase compare treats this upsert as
+      // the paired removal's `sameKeyRemoval` and re-reads its current
+      // revision via the removal's sentinel path (always -1 for raw-JSON),
+      // so this upsert's expected value must match that same sentinel.
+      expectedRevision: rawEntryJsonRemovalKeys.has(sessionKey)
+        ? -1
+        : (revisionAtSnapshot.get(sessionKey) ?? -1),
       sessionKey,
       entry: cloned,
       ...(resetBoundaryPlan ? { resetBoundaryPlan } : {}),
