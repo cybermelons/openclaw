@@ -87,7 +87,7 @@ function participantRecordsBySessionKey(
   return records;
 }
 
-function withProjectedParticipants(
+export function withProjectedParticipants(
   entry: SessionEntry,
   records: readonly SessionParticipantRecord[],
 ): SessionEntry {

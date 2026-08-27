@@ -14,8 +14,10 @@
 // Zero production changes. Test + fixtures only.
 import { beforeEach, describe, expect, it } from "vitest";
 import { useTempSqliteSessionStore } from "./phase0-fixtures.test-support.js";
-import { parseReadableSqliteSessionEntryRow } from "./session-accessor.sqlite-entry-store.js";
-import { parseSessionEntryJson } from "./session-accessor.sqlite-status.js";
+import {
+  parseReadableSqliteSessionEntryRow,
+  parseSessionEntryJson,
+} from "./session-entry-parse.js";
 
 type RawSessionNodeRow = {
   current_session_id: string;

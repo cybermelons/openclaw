@@ -5,16 +5,7 @@ import type {
   SessionEntryStatus,
   SessionEntrySummary,
 } from "./session-accessor.sqlite-contract.js";
-import {
-  projectSqliteSessionOwner,
-  type SqliteSessionOwnerRow,
-} from "./session-accessor.sqlite-owner-projection.js";
-import {
-  hasValidSessionEntryIdentity,
-  parseSqliteSessionEntryRecord,
-} from "./session-entry-json.js";
-import { projectCanonicalSessionEntryShape } from "./store-entry-shape.js";
-import type { SessionEntry } from "./types.js";
+import { hasValidSessionEntryIdentity, parseSessionEntryJson } from "./session-entry-parse.js";
 
 type SessionStatusDatabase = Pick<OpenClawAgentKyselyDatabase, "session_nodes">;
 
@@ -29,17 +20,6 @@ export function normalizeStatus(value: unknown): SessionEntryStatus | null {
 }
 
 export { hasValidSessionEntryIdentity };
-
-export function parseSessionEntryJson(
-  row: {
-    current_session_id?: string;
-    entry_json: string;
-    updated_at?: number;
-  } & SqliteSessionOwnerRow,
-): SessionEntry | null {
-  const record = parseSqliteSessionEntryRecord(row);
-  return record ? projectSqliteSessionOwner(projectCanonicalSessionEntryShape(record), row) : null;
-}
 
 export function readSessionEntriesByStatus(
   database: OpenClawAgentDatabase,

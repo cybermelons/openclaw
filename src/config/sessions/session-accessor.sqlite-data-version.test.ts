@@ -49,8 +49,8 @@ vi.mock("../../infra/kysely-sync.js", async (importOriginal) => {
   };
 });
 
-vi.mock("./session-accessor.sqlite-status.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./session-accessor.sqlite-status.js")>();
+vi.mock("./session-entry-parse.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./session-entry-parse.js")>();
   return {
     ...actual,
     parseSessionEntryJson: (row: Parameters<typeof actual.parseSessionEntryJson>[0]) => {
