@@ -239,13 +239,20 @@ describe("Phase-4 CS-5 sqlite reader thin-wrapper (T-P4-CS5)", () => {
       "PROJECTION_RETRY_BUDGET_MS",
     ];
     const repoRoot = path.resolve(__dirname, "../../..");
+    // Exclude this probe file: it names the deleted symbols as string literals,
+    // so an unscoped grep would match itself and never pass.
+    const selfPath = path.relative(repoRoot, __filename).split(path.sep).join("/");
     for (const symbol of deletedSymbols) {
       let output = "";
       try {
-        output = execFileSync("git", ["grep", "-nF", symbol, "--", "src", "test"], {
-          cwd: repoRoot,
-          encoding: "utf-8",
-        });
+        output = execFileSync(
+          "git",
+          ["grep", "-nF", symbol, "--", "src", "test", `:(exclude)${selfPath}`],
+          {
+            cwd: repoRoot,
+            encoding: "utf-8",
+          },
+        );
       } catch (error) {
         // git grep exits 1 with empty output when there are no matches --
         // that is the expected passing state for this probe.

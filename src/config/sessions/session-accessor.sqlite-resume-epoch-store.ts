@@ -8,10 +8,24 @@ import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
  * row is an invariant violation, not a drain-pending signal (the CS-2 migration
  * backfills every session as `epoch=0, state='drained'`).
  *
- * CS-2 is write-only — nothing reads the marker to gate dispatch/reseed yet. The
- * reader that refuses a drain-pending epoch arrives in CS-3/CS-4. `readResumeEpoch`
- * exists only to let CS-2's CRUD test observe writes; do not wire it into the
- * resume/dispatch path.
+ * ## #24 seam (PHASE-4.md §6) — stable exported surface
+ *
+ * This module is the store-API surface issue #24's read/visibility work builds
+ * on. Its contract, re-exported through `session-accessor.ts`:
+ *
+ * - `readSessionResumeEpoch` returns the marker with its stored `state`. #24
+ *   decides resumption durability by this committed state — an epoch is either
+ *   `drain_pending` or fully `drained`, decided by commit. #24 must never
+ *   re-derive resumption state from row heuristics (`running`/`abortedLastRun`).
+ * - `SessionResumeDrainPendingError` (own module) is the typed, retryable refusal
+ *   thrown by tail-dependent resume readers; catch it by type, not by message.
+ * - The post-commit dispatch boundary in `main-session-restart-dispatch.ts` is the
+ *   single point where "resumption is durable" becomes observable (a committed
+ *   `drained` marker), not an in-process flag.
+ *
+ * As of CS-3/CS-4 `readSessionResumeEpoch` IS on the resume/dispatch path (via
+ * `readSessionResumeEpochForScope` in the history reader). Writes join the drain
+ * transaction in CS-3 so drain + marker commit atomically (§3 boundary).
  */
 
 export type SessionResumeEpochState = "drain_pending" | "drained";
@@ -51,7 +65,9 @@ export function writeSessionResumeEpoch(
  * Read one session's resume-epoch marker, or `null` when absent. A `null`
  * return is an invariant violation for a real session (the migration backfills
  * all sessions); callers must treat absence as an error to surface, never as
- * drain-pending. Present only for CS-2 test observability.
+ * drain-pending. On the resume path the check runs inside the transcript-read
+ * snapshot (`readSessionResumeEpochForScope`); this raw form serves store-API
+ * callers and #24.
  */
 export function readSessionResumeEpoch(
   database: OpenClawAgentDatabase,

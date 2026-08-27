@@ -105,3 +105,20 @@ Per-CS landed state on `rearch/session-store`. Not merged to `main`, not deploye
 - **CS-3 epoch increment.** Implementer prose said `current?.epoch ?? 0 + 1` (a precedence bug), but the committed code is `(current?.epoch ?? 0) + 1` — correct and monotonic. Verified against the tree.
 
 **Open seams still owned by issue #38** (not resolved by CS-1..CS-5): items 1–6 in the issue — the marker/transcript key gap (§II.1), `drain_pending` never written in production, restart-scan dispatch derivation, lazy-stub epoch seeding, cross-window duplication, and the smaller unowned items. These gate the Phase 4.5 green-light decision, not CS-6.
+
+## §9 Phase-4 wall (CS-6, landed)
+
+The permanent Phase-4 wall. Run these together to gate any change to the resumption-ordering mechanism:
+
+| Test (§5 mapping)                 | File                                                                         |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| T1 — drain-before-dispatch order  | `src/agents/cli-transcript-reconcile.test.ts` (drain+marker one txn, atomic) |
+| T1 — restart re-dispatch scan     | `src/agents/main-session-recovery/main-session-restart-recovery.test.ts`     |
+| T2 — reader refuses drain-pending | `src/agents/cli-runner/session-history.resume-drain-pending.test.ts`         |
+| T3 — deletion safety / fallback   | `src/agents/cli-runner/session-history.sqlite-projection-fallback.test.ts`   |
+| Pin flip (three-state reseed)     | `src/agents/cli-runner/prepare-reseed-caller.phase0.test.ts`                 |
+| Marker CRUD + backfill            | `src/config/sessions/session-accessor.sqlite-resume-epoch-store.test.ts`     |
+| Reader regression suite           | `src/agents/cli-runner/session-history.test.ts`                              |
+| Doctor tripwire (cross-phase)     | `src/commands/doctor-session-canonical-keys.test.ts`                         |
+
+The **#24 seam** (§6) is exported from `src/config/sessions/session-accessor.ts`: `readSessionResumeEpoch` / `writeSessionResumeEpoch` / `SessionResumeEpochState` / `SessionResumeEpochRow` (marker + committed state) and `SessionResumeDrainPendingError` / `isSessionResumeDrainPendingError` (typed retryable refusal). The store module doc-comment (`session-accessor.sqlite-resume-epoch-store.ts`) carries the contract prose. #24 reads resumption durability from the committed `state`, never from row heuristics.

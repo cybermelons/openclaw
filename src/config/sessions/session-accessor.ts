@@ -276,6 +276,15 @@ export {
   isSessionResumeDrainPendingError,
   SessionResumeDrainPendingError,
 } from "./session-resume-drain-pending-error.js";
+// Phase-4 #24 seam (PHASE-4.md §6): the resume_epoch marker, readable through
+// the store API with its committed state. #24 reads durability from this, never
+// from row heuristics.
+export {
+  readSessionResumeEpoch,
+  writeSessionResumeEpoch,
+  type SessionResumeEpochRow,
+  type SessionResumeEpochState,
+} from "./session-accessor.sqlite-resume-epoch-store.js";
 export type {
   SessionTranscriptBoundedMessageTailPage,
   SessionTranscriptMessageAnchorPage,
