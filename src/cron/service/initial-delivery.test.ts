@@ -48,9 +48,7 @@ describe("resolveInitialCronDelivery", () => {
         { kind: "script", script: "return { notify: 'hello' }" },
       ];
       for (const payload of payloads) {
-        expect(
-          resolveInitialCronDelivery(createInput({ sessionTarget, payload })),
-        ).toBeUndefined();
+        expect(resolveInitialCronDelivery(createInput({ sessionTarget, payload }))).toBeUndefined();
       }
     },
   );
