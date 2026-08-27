@@ -36,7 +36,12 @@ export function projectSessionEntryMessage(entry: SessionTreeEntry): AgentMessag
       );
     case "compaction":
       return asAgentMessage(
-        createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp),
+        createCompactionSummaryMessage(
+          entry.summary,
+          entry.tokensBefore,
+          entry.timestamp,
+          entry.anchor,
+        ),
       );
     default:
       return undefined;

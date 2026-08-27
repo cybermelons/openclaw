@@ -241,6 +241,59 @@ describe("buildSessionContext", () => {
     expect(assistants[3]?.providerReplay).toEqual(postBoundaryCheckpoint);
   });
 
+  it("renders a resolvable transcript anchor into the compaction summary content", () => {
+    const entries: SessionTreeEntry[] = [
+      userEntry("old", null, "discarded"),
+      userEntry("kept", "old", "retained"),
+      {
+        type: "compaction",
+        id: "compaction",
+        parentId: "kept",
+        timestamp,
+        summary: "older context",
+        firstKeptEntryId: "kept",
+        tokensBefore: 123,
+        anchor: { minSeq: 1, maxSeq: 2, lastEventId: "old" },
+      },
+      userEntry("new", "compaction", "new turn"),
+    ];
+
+    const context = buildSessionContext(entries);
+    const summaryMessage = context.messages[0];
+
+    expect(summaryMessage?.role).toBe("compactionSummary");
+    const summaryText =
+      summaryMessage && "summary" in summaryMessage ? summaryMessage.summary : undefined;
+    expect(summaryText).toContain("older context");
+    expect(summaryText).toContain("Transcript anchor: events seq 1-2");
+    expect(summaryText).toContain("last message id old");
+    expect(summaryText).toContain("sessions_history");
+  });
+
+  it("omits the transcript anchor line for compaction entries without an anchor", () => {
+    const entries: SessionTreeEntry[] = [
+      userEntry("old", null, "discarded"),
+      userEntry("kept", "old", "retained"),
+      {
+        type: "compaction",
+        id: "compaction",
+        parentId: "kept",
+        timestamp,
+        summary: "older context",
+        firstKeptEntryId: "kept",
+        tokensBefore: 123,
+      },
+      userEntry("new", "compaction", "new turn"),
+    ];
+
+    const context = buildSessionContext(entries);
+    const summaryMessage = context.messages[0];
+    const summaryText =
+      summaryMessage && "summary" in summaryMessage ? summaryMessage.summary : undefined;
+    expect(summaryText).toBe("older context");
+    expect(summaryText).not.toContain("Transcript anchor");
+  });
+
   it("treats the latest reset as a hard cut with a user/assistant-only kept tail", () => {
     const retainedCheckpoint = replayState("openai-responses-compaction", "reset-checkpoint");
     const entries: SessionTreeEntry[] = [

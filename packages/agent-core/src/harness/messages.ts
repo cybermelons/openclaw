@@ -100,10 +100,14 @@ export function createCompactionSummaryMessage(
   summary: string,
   tokensBefore: number,
   timestamp: string,
+  anchor?: { minSeq: number; maxSeq: number; lastEventId: string },
 ): CompactionSummaryMessage {
+  const anchoredSummary = anchor
+    ? `${summary}\n\nTranscript anchor: events seq ${anchor.minSeq}-${anchor.maxSeq} (last message id ${anchor.lastEventId}). If any point above is too thin, call sessions_history with this id/range to re-read the raw span.`
+    : summary;
   return {
     role: "compactionSummary",
-    summary,
+    summary: anchoredSummary,
     tokensBefore,
     timestamp: requireSessionTimestampMs(timestamp, "compaction summary timestamp"),
   };

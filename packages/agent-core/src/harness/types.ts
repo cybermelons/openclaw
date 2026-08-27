@@ -66,6 +66,8 @@ export interface CompactionEntry<T = unknown> extends SessionTreeEntryBase {
   tokensBefore: number;
   details?: T;
   fromHook?: boolean;
+  /** Raw transcript span the summary replaces, for on-demand re-read via sessions_history. */
+  anchor?: { minSeq: number; maxSeq: number; lastEventId: string };
 }
 
 type ResetReason = "new" | "reset" | "idle" | "daily" | "cron-stale";

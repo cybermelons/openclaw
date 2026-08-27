@@ -1287,6 +1287,11 @@ export function buildAgentSystemPrompt(params: {
             `Asked about another chat/group/session not in context: check ${sessionLookupTools.map((name) => `\`${name}\``).join("/")} before claiming no access.`,
           ]
         : []),
+      ...(renderOpenClawToolWorkflowHints && availableTools.has("sessions_history")
+        ? [
+            'A compaction summary with a "Transcript anchor" line can be re-read raw: call `sessions_history` with that anchor.',
+          ]
+        : []),
       "",
       ...buildProactiveSubagentOrchestrationSection({
         enabled: proactiveSubagentOrchestration,

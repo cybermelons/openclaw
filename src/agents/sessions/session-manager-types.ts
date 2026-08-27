@@ -50,6 +50,8 @@ export interface CompactionEntry<T = unknown> extends SessionEntryBase {
   details?: T;
   /** True for extension-generated compaction entries. */
   fromHook?: boolean;
+  /** Raw transcript span the summary replaces, for on-demand re-read via sessions_history. */
+  anchor?: { minSeq: number; maxSeq: number; lastEventId: string };
 }
 
 export type ResetReason = "new" | "reset" | "idle" | "daily" | "cron-stale";

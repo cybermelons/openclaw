@@ -17,7 +17,11 @@ import { unwrapCoreResult } from "./agent-session-utils.js";
 import { formatNoModelSelectedMessage } from "./auth-guidance.js";
 import { preflightManualSessionCompaction } from "./manual-compaction-preflight.js";
 import { getModelRegistryRuntime } from "./model-registry-runtime.js";
-import { getLatestCompactionEntry, type CompactionEntry } from "./session-manager.js";
+import {
+  getLatestCompactionEntry,
+  type CompactionEntry,
+  type SessionEntry,
+} from "./session-manager.js";
 import type { SettingsManager } from "./settings-manager.js";
 
 type CompactionReason = "manual" | "threshold" | "overflow";
@@ -31,6 +35,40 @@ type CompactionWorkOutcome =
 export const agentSessionAutomaticCompaction: unique symbol = Symbol.for(
   "openclaw.agent-session.automatic-compaction",
 );
+
+/**
+ * Find the entry-id span [start, end] that this compaction summarized: from the
+ * entry right after the previous compaction/reset boundary (or session start) up
+ * to the entry right before the new firstKeptEntryId. Mirrors the boundary walk in
+ * `prepareCompaction`. Returns undefined for an empty span (nothing was summarized).
+ */
+function findSummarizedEntrySpan(
+  pathEntries: SessionEntry[],
+  firstKeptEntryId: string,
+): { startEntryId: string; endEntryId: string } | undefined {
+  const firstKeptEntryIndex = pathEntries.findIndex((entry) => entry.id === firstKeptEntryId);
+  if (firstKeptEntryIndex <= 0) {
+    return undefined;
+  }
+  let prevBoundaryIndex = -1;
+  for (let i = firstKeptEntryIndex - 1; i >= 0; i--) {
+    const type = pathEntries[i]?.type;
+    if (type === "compaction" || type === "reset") {
+      prevBoundaryIndex = i;
+      break;
+    }
+  }
+  const spanStart = prevBoundaryIndex + 1;
+  if (spanStart >= firstKeptEntryIndex) {
+    return undefined;
+  }
+  const startEntryId = pathEntries[spanStart]?.id;
+  const endEntryId = pathEntries[firstKeptEntryIndex - 1]?.id;
+  if (!startEntryId || !endEntryId) {
+    return undefined;
+  }
+  return { startEntryId, endEntryId };
+}
 
 export abstract class AgentSessionCompaction extends AgentSessionInspection {
   // =========================================================================
@@ -240,12 +278,21 @@ export abstract class AgentSessionCompaction extends AgentSessionInspection {
       return { status: "aborted" };
     }
 
+    const summarizedSpan = findSummarizedEntrySpan(pathEntries, compactionResult.firstKeptEntryId);
+    const anchor = summarizedSpan
+      ? this.sessionManager.resolveTranscriptSpanAnchor(
+          summarizedSpan.startEntryId,
+          summarizedSpan.endEntryId,
+        )
+      : undefined;
+
     this.sessionManager.appendCompaction(
       compactionResult.summary,
       compactionResult.firstKeptEntryId,
       compactionResult.tokensBefore,
       compactionResult.details,
       fromExtension,
+      anchor,
     );
     const newEntries = this.sessionManager.getEntries();
     const sessionContext = this.sessionManager.buildSessionContext();

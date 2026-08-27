@@ -201,6 +201,7 @@ export class SessionManagerEntries extends SessionManagerPersistence {
     tokensBefore: number,
     details?: unknown,
     fromHook?: boolean,
+    anchor?: { minSeq: number; maxSeq: number; lastEventId: string },
   ): string {
     const entry: CompactionEntry = {
       type: "compaction",
@@ -212,6 +213,7 @@ export class SessionManagerEntries extends SessionManagerPersistence {
       tokensBefore,
       details,
       fromHook,
+      ...(anchor ? { anchor } : {}),
     };
     this.appendEntry(entry, {
       invalidateSerializedPrefixCache: fromHook === true || details !== undefined,
@@ -390,6 +392,36 @@ export class SessionManagerEntries extends SessionManagerPersistence {
 
   buildSessionContext(): SessionContext {
     return buildCoreSessionContext(this.getBranch() as CoreSessionTreeEntry[]) as SessionContext;
+  }
+
+  /**
+   * Resolve a coarse transcript anchor covering [startEntryId, endEntryId] using the
+   * existing SQLite identity index. Returns undefined when the store is not SQLite-backed
+   * or either endpoint has no resolvable transcript identity (e.g. legacy entries).
+   */
+  resolveTranscriptSpanAnchor(
+    startEntryId: string,
+    endEntryId: string,
+  ): { minSeq: number; maxSeq: number; lastEventId: string } | undefined {
+    if (!this.persistenceTarget) {
+      return undefined;
+    }
+    const startAnchor = readActiveTranscriptEntryAnchor({
+      ...this.persistenceTarget,
+      entryId: startEntryId,
+    });
+    const endAnchor = readActiveTranscriptEntryAnchor({
+      ...this.persistenceTarget,
+      entryId: endEntryId,
+    });
+    if (!startAnchor || !endAnchor) {
+      return undefined;
+    }
+    return {
+      minSeq: Math.min(startAnchor.rawSeq, endAnchor.rawSeq),
+      maxSeq: Math.max(startAnchor.rawSeq, endAnchor.rawSeq),
+      lastEventId: endAnchor.entryId,
+    };
   }
 
   getBoundaryCount(): number {
