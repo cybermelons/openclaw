@@ -146,6 +146,13 @@ export async function handleChatAbortRequestWithLifecycle(
       : [];
   const respondWithWorkerRuns = (localRunIds: string[], sessionId?: string): void => {
     const runIds = [...new Set([...localRunIds, ...cancelWorkerRun(sessionId)])];
+    if (runIds.length === 0) {
+      context.logGateway.info("chat.abort no-op", {
+        runId: runId ?? null,
+        sessionKey: canonicalAbortSessionKey,
+        outcome: "nothing-aborted",
+      });
+    }
     respond(true, { ok: true, aborted: runIds.length > 0, runIds });
   };
 
@@ -306,6 +313,11 @@ export async function handleChatAbortRequestWithLifecycle(
         runId,
       )
     ) {
+      context.logGateway.info("chat.abort no-op", {
+        runId: runId ?? null,
+        sessionKey: canonicalAbortSessionKey,
+        outcome: "nothing-aborted",
+      });
       respond(true, { ok: true, aborted: false, runIds: [] });
       return;
     }

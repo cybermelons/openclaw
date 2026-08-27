@@ -5275,6 +5275,7 @@ export const en: TranslationMap = {
       unavailable: "Unavailable",
       expired: "Expired",
       disconnected: "Not connected. Try again after reconnecting.",
+      stopFailed: "Could not stop the run. It may have already finished.",
     },
     imageLightbox: {
       label: "Image preview: {title}",
