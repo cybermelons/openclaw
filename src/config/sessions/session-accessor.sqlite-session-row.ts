@@ -88,6 +88,7 @@ export function bindSessionNode(params: {
   const legacyActorId = normalizeText(
     (params.entry as SessionEntry & { createdBy?: { id?: unknown } }).createdBy?.id,
   );
+  const spawnedBy = normalizeText(params.entry.spawnedBy);
   return {
     session_key: params.sessionKey,
     current_session_id: params.entry.sessionId,
@@ -101,9 +102,8 @@ export function bindSessionNode(params: {
       normalizeSqliteCreatedActorType(actor?.type) ?? (legacyActorId ? "human" : null),
     created_actor_id: normalizeText(actor?.id) ?? legacyActorId,
     project_id: normalizeText(params.entry.projectId),
-    parent_session_key:
-      normalizeText(params.entry.parentSessionKey) ?? normalizeText(params.entry.spawnedBy),
-    spawned_by: normalizeText(params.entry.spawnedBy),
+    parent_session_key: normalizeText(params.entry.parentSessionKey) ?? spawnedBy,
+    spawned_by: spawnedBy,
     fork_source_session_key: normalizeText(params.entry.forkSource?.sessionKey),
     fork_source_session_id: normalizeText(params.entry.forkSource?.sessionId),
     fork_source_entry_id: normalizeText(params.entry.forkSource?.entryId),
