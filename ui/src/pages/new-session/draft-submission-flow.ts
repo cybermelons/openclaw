@@ -13,7 +13,10 @@ import {
 import { openTerminalSessionInTerminal } from "../../lib/sessions/catalog-terminal.ts";
 import type { CloudSessionRecovery } from "../../lib/sessions/cloud-recovery.ts";
 import { deleteCloudDraftSession } from "../../lib/sessions/cloud-startup.ts";
-import { sessionNavigationTarget } from "../../lib/sessions/route-navigation.ts";
+import {
+  composerDraftSearch,
+  sessionNavigationTarget,
+} from "../../lib/sessions/route-navigation.ts";
 import { normalizeAgentId } from "../../lib/sessions/session-key.ts";
 import { isTerminalAvailable } from "../../lib/terminal-availability.ts";
 import { createManagedWorktree } from "../../lib/worktrees/create-worktree.ts";
@@ -44,6 +47,7 @@ import {
 
 export class DraftSubmissionFlow {
   private visibilityValue: NewSessionVisibility = "normal";
+  private holdMessageValue = false;
   private messageValue = "";
   private submittingValue = false;
   private blockedSubmitGate: string | null = null;
@@ -65,6 +69,10 @@ export class DraftSubmissionFlow {
 
   get visibility(): NewSessionVisibility {
     return this.visibilityValue;
+  }
+
+  get holdMessage(): boolean {
+    return this.holdMessageValue;
   }
 
   get message(): string {
@@ -90,6 +98,11 @@ export class DraftSubmissionFlow {
 
   setVisibility(visibility: NewSessionVisibility) {
     this.visibilityValue = visibility;
+    this.callbacks.requestUpdate();
+  }
+
+  setHoldMessage(hold: boolean) {
+    this.holdMessageValue = hold;
     this.callbacks.requestUpdate();
   }
 
@@ -168,6 +181,7 @@ export class DraftSubmissionFlow {
       message?: string;
       attachments?: unknown[];
       visibility?: NewSessionVisibility;
+      holdInitialTurn?: boolean;
     } = {},
   ): Record<string, unknown> {
     const snapshot = this.read();
@@ -187,6 +201,7 @@ export class DraftSubmissionFlow {
       execNode: this.place.execNode,
       catalogId: snapshot.data?.catalogId,
       category: this.gateway.resolvedGroupCategory(),
+      holdInitialTurn: options.holdInitialTurn ?? this.holdMessageValue,
     });
   }
 
@@ -311,6 +326,7 @@ export class DraftSubmissionFlow {
       ? (this.submissionOutcomeUnknownValue ?? "cloud-interrupted")
       : null;
     this.visibilityValue = "normal";
+    this.holdMessageValue = false;
     this.attachmentDraft.reset({ release: true });
     if (preservePendingCloud) {
       if (!this.pendingCloud.restored) {
@@ -418,6 +434,7 @@ export class DraftSubmissionFlow {
         message: cloudProfileId ? "" : message,
         visibility: draftRetired ? "normal" : this.visibilityValue,
         attachments: cloudProfileId ? undefined : apiAttachments,
+        holdInitialTurn: cloudProfileId ? false : this.holdMessageValue,
       });
       const cloudCreateParams = cloudProfileId
         ? pendingCloud
@@ -561,6 +578,7 @@ export class DraftSubmissionFlow {
         return;
       }
       const handedOffAttachments =
+        !this.holdMessageValue &&
         result.initialRun.status === "rejected" &&
         retainRejectedInitialTurn({
           agentId: this.place.agentId,
@@ -570,7 +588,7 @@ export class DraftSubmissionFlow {
           message,
           sessionKey: result.key,
         });
-      if (result.initialRun.status === "started") {
+      if (!this.holdMessageValue && result.initialRun.status === "started") {
         prepareInitialUserMessageHandoff(
           context.initialUserMessage,
           result.key,
@@ -589,15 +607,20 @@ export class DraftSubmissionFlow {
         sessionKey: result.key,
         agentId: submissionAgentId,
       });
+      const navigationTarget = sessionNavigationTarget({
+        context,
+        face: "chat",
+        sessionKey: result.key,
+        agentId: this.place.agentId,
+        focusComposer: true,
+      });
+      const navigationOptions =
+        this.holdMessageValue && message
+          ? { ...navigationTarget.options, search: composerDraftSearch(message) }
+          : navigationTarget.options;
       await this.navigateToStartedSession(
         context,
-        sessionNavigationTarget({
-          context,
-          face: "chat",
-          sessionKey: result.key,
-          agentId: this.place.agentId,
-          focusComposer: true,
-        }).options,
+        navigationOptions,
       );
     } catch (error) {
       if (requestId === this.submitRequestToken && this.gateway.client === submissionClient) {

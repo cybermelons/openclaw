@@ -368,7 +368,9 @@ describe("new-session composer attachment drops", () => {
     const { composer } = renderComposer();
     const switches = composer.querySelectorAll<HTMLButtonElement>('[role="switch"]');
 
-    expect(switches).toHaveLength(0);
+    // The hold-message pill is unconditional, so only it renders when drafts are unavailable.
+    expect(switches).toHaveLength(1);
+    expect(switches[0]?.textContent).toContain("Hold message");
   });
 
   it("lets the draft pill replace page-level incognito", () => {
@@ -378,9 +380,11 @@ describe("new-session composer attachment drops", () => {
       visibility: "incognito",
       onVisibilityChange,
     });
-    const draftPill = composer.querySelector<HTMLButtonElement>('[role="switch"]');
+    const switches = composer.querySelectorAll<HTMLButtonElement>('[role="switch"]');
+    const draftPill = Array.from(switches).find((button) =>
+      button.textContent?.includes("Private"),
+    );
 
-    expect(draftPill?.textContent).toContain("Draft");
     expect(draftPill?.getAttribute("aria-checked")).toBe("false");
 
     draftPill?.click();

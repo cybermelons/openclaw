@@ -22,7 +22,7 @@ import { renderChatImageLightbox } from "../chat/components/chat-image-lightbox.
 import { renderWelcomeState } from "../chat/components/chat-welcome.ts";
 import * as catalog from "./catalog-target.ts";
 import type { SubmissionOutcomeReason } from "./cloud-recovery-state.ts";
-import { renderDraftError, renderNewSessionDraftComposer } from "./composer.ts";
+import { guardDraftEdit, renderDraftError, renderNewSessionDraftComposer } from "./composer.ts";
 import { renderConnectMachineDialog } from "./connect-machine-dialog.ts";
 import { isWorktreeNameValid } from "./create-params.ts";
 import { renderDetailChip, resolveDetailChip } from "./detail-chip.ts";
@@ -71,6 +71,8 @@ class NewSessionPage extends OpenClawLightDomElement {
   private readonly browser: DraftPlaceBrowser;
   private readonly place: DraftPlaceState;
   private readonly submission: DraftSubmissionFlow;
+  private readonly canEditDraft = () =>
+    !this.submission.submitting && !this.submission.pendingCloud.sessionKey;
   private readonly subscriptions: SubscriptionsController;
 
   constructor() {
@@ -601,6 +603,7 @@ class NewSessionPage extends OpenClawLightDomElement {
           message: this.submission.message,
           visibility: this.submission.visibility,
           draftAvailable: this.submission.canStartAsDraft(),
+          holdMessage: this.submission.holdMessage,
           modelControl: this.place.modelControl,
           requiresModifier: loadSettings().chatSendShortcut === "modifier-enter",
           submitting: this.submission.submitting,
@@ -613,19 +616,16 @@ class NewSessionPage extends OpenClawLightDomElement {
                 onStart: () => void this.submission.startInTerminal(),
               }
             : undefined,
-          onInput: (message) => {
-            if (!this.submission.submitting && !this.submission.pendingCloud.sessionKey) {
-              this.setMessageFromUser(message);
-            }
-          },
+          onInput: guardDraftEdit(this.canEditDraft, (message) => this.setMessageFromUser(message)),
           onOpenImage: (item) => {
             this.imageLightbox = item;
           },
-          onVisibilityChange: (visibility) => {
-            if (!this.submission.submitting && !this.submission.pendingCloud.sessionKey) {
-              this.submission.setVisibility(visibility);
-            }
-          },
+          onVisibilityChange: guardDraftEdit(this.canEditDraft, (visibility) =>
+            this.submission.setVisibility(visibility),
+          ),
+          onHoldMessageChange: guardDraftEdit(this.canEditDraft, (hold) =>
+            this.submission.setHoldMessage(hold),
+          ),
           onSubmit: () => void this.submission.submit(),
         })}
       </div>
