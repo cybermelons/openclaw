@@ -66,7 +66,7 @@ function makeAbortHost(over: Partial<AbortHost> = {}): AbortHost {
 
 describe("handleAbortChat", () => {
   it("dispatches sessions.abort when only descendant work remains", async () => {
-    const request = vi.fn(async () => ({ status: "aborted" }));
+    const request = vi.fn(async () => ({ status: "aborted", abortedRunId: "run-main" }));
     const host = makeAbortHost({
       client: { request } as unknown as GatewayBrowserClient,
       sessionsResult: makeSessionsResult([
@@ -86,6 +86,28 @@ describe("handleAbortChat", () => {
       key: "agent:main",
       clearQueued: true,
     });
+    expect(host.chatError ?? null).toBeNull();
+  });
+
+  it("surfaces a stop-failed error when the abort is a no-op", async () => {
+    const request = vi.fn(async () => ({ ok: true, aborted: false, runIds: [] }));
+    const host = makeAbortHost({
+      client: { request } as unknown as GatewayBrowserClient,
+      chatRunId: "run-main",
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenNthCalledWith(1, "chat.abort", {
+      sessionKey: "agent:main",
+      runId: "run-main",
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "chat.abort", {
+      sessionKey: "agent:main",
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(host.chatError).toBe("Could not stop the run. It may have already finished.");
+    expect(host.lastError).toBe(host.chatError);
   });
 
   it("shows reconnect guidance when an offline session run has no browser run identity", async () => {

@@ -407,13 +407,16 @@ async function sendQueuedChatMessage(
         });
         void loadChatHistory(host);
       } else if (isNonTerminalAgentRunStatus(ack.status)) {
+        const hadRunId = Boolean(host.chatRunId);
         const adopted = host.chatRunId === ack.runId;
         const adoptedStream = adopted && typeof host.chatStream === "string";
-        host.chatRunId = ack.runId;
+        if (!hadRunId) {
+          host.chatRunId = ack.runId;
+        }
         if (!adopted) {
           host.chatRunStartup = null;
         }
-        if (!adoptedStream) {
+        if (!hadRunId && !adoptedStream) {
           host.chatStream = "";
           host.chatStreamStartedAt = startedAt;
         }

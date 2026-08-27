@@ -301,10 +301,23 @@ export function createSessionMutations(host: SessionMutationsHost) {
     // can fail and would leave that intent rolling back to a pre-patch value.
     // The Gateway stamps `pinnedAt` with its own clock, so the baseline is a
     // round trip off — accurate enough to order a row it just pinned.
-    const confirmPinPatch = () => {
+    const confirmPinPatch = (result: SessionsPatchResult) => {
       const pendingPinPatch = pendingPinPatches.get(normalizedKey);
-      if (pinPatchStarted && pendingPinPatch && pendingPinPatch.token !== pinPatchToken) {
+      if (!pinPatchStarted || !pendingPinPatch) {
+        return;
+      }
+      if (pendingPinPatch.token !== pinPatchToken) {
         pendingPinPatch.previous = pinRowFields(nextPinned, undefined);
+        return;
+      }
+      // The RPC not throwing only means the request landed, not that the
+      // Gateway applied the requested pin state (a clamp/limit can no-op it).
+      // Reconcile the optimistic overlay to the server-confirmed value so the
+      // row does not settle "true" on a state the Gateway never produced.
+      const confirmedPinned = result.entry?.pinned;
+      if (typeof confirmedPinned === "boolean" && confirmedPinned !== nextPinned) {
+        pendingPinPatch.next = pinRowFields(confirmedPinned, result.entry?.pinnedAt);
+        host.redecorateLists();
       }
     };
     const settlePinPatch = (completed: boolean) => {
@@ -378,7 +391,7 @@ export function createSessionMutations(host: SessionMutationsHost) {
       } else if (patchParams.archived === false) {
         confirmedArchives.delete(normalizedKey);
       }
-      confirmPinPatch();
+      confirmPinPatch(result);
       if (!options.deferListRefresh) {
         await host.refreshReplacement(options.agentId);
         if (!host.connection.isCurrent(scope)) {
