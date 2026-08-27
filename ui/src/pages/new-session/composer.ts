@@ -45,11 +45,13 @@ type NewSessionComposerOptions = {
   messageLocked?: boolean;
   visibility?: NewSessionVisibility;
   draftAvailable?: boolean;
+  holdMessage?: boolean;
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
   onPendingReadsChange: (delta: 1 | -1) => void;
   onInput: (message: string) => void;
   onOpenImage?: (item: ImageLightboxItem) => void;
   onVisibilityChange?: (visibility: NewSessionVisibility) => void;
+  onHoldMessageChange?: (hold: boolean) => void;
   onSubmit: () => void;
 };
 
@@ -114,6 +116,15 @@ function renderStartControl(options: NewSessionComposerOptions) {
   `;
 }
 
+/** Wraps a composer-option callback so it no-ops while `editable` is false. */
+export function guardDraftEdit<T>(editable: () => boolean, apply: (value: T) => void) {
+  return (value: T) => {
+    if (editable()) {
+      apply(value);
+    }
+  };
+}
+
 export class NewSessionComposerTextareaController {
   private textarea: HTMLTextAreaElement | null = null;
 
@@ -166,6 +177,25 @@ function renderVisibilityPill(params: {
       @click=${() => params.options.onVisibilityChange?.(active ? "normal" : params.mode)}
     >
       <span aria-hidden="true">${params.icon}</span>${params.label}
+    </button>
+  `;
+}
+
+/** Hold-message pill: orthogonal to visibility, suppresses the initial turn. */
+function renderHoldMessagePill(options: NewSessionComposerOptions) {
+  const active = options.holdMessage === true;
+  const disabled = options.submitting || options.messageLocked;
+  return html`
+    <button
+      type="button"
+      class="new-session-page__visibility ${active ? "new-session-page__visibility--active" : ""}"
+      role="switch"
+      aria-checked=${String(active)}
+      ?disabled=${disabled}
+      title=${t("newSession.holdMessageDescription")}
+      @click=${() => options.onHoldMessageChange?.(!active)}
+    >
+      <span aria-hidden="true">${icons.pause}</span>${t("newSession.holdMessage")}
     </button>
   `;
 }
@@ -266,6 +296,7 @@ function renderNewSessionComposer(options: NewSessionComposerOptions) {
                   options,
                 })
               : nothing}
+            ${renderHoldMessagePill(options)}
           </div>
         </div>
         ${options.blockedSubmitNotice
@@ -291,6 +322,7 @@ export function renderNewSessionDraftComposer(options: {
   message: string;
   visibility?: NewSessionVisibility;
   draftAvailable?: boolean;
+  holdMessage?: boolean;
   modelControl: NewSessionModelControl;
   textareaController: NewSessionComposerTextareaController;
   requiresModifier: boolean;
@@ -306,6 +338,7 @@ export function renderNewSessionDraftComposer(options: {
   onInput: (message: string) => void;
   onOpenImage?: (item: ImageLightboxItem) => void;
   onVisibilityChange?: (visibility: NewSessionVisibility) => void;
+  onHoldMessageChange?: (hold: boolean) => void;
   onSubmit: () => void;
 }) {
   const readSignal = options.attachmentDraft.readSignal;
@@ -317,6 +350,7 @@ export function renderNewSessionDraftComposer(options: {
     message: options.message,
     visibility: options.visibility,
     draftAvailable: options.draftAvailable,
+    holdMessage: options.holdMessage,
     modelControl: options.isCatalogTarget
       ? nothing
       : options.modelControl.render({
@@ -343,6 +377,7 @@ export function renderNewSessionDraftComposer(options: {
     onInput: options.onInput,
     onOpenImage: options.onOpenImage,
     onVisibilityChange: options.onVisibilityChange,
+    onHoldMessageChange: options.onHoldMessageChange,
     onSubmit: options.onSubmit,
   });
 }

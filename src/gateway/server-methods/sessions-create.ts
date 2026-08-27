@@ -565,7 +565,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       forkFrom: p.forkFrom,
       succeedsParent: p.succeedsParent,
       emitCommandHooks: p.emitCommandHooks,
-      resetMainWhenUnspecified: !hasInitialTurn,
+      resetMainWhenUnspecified: !hasInitialTurn || p.holdInitialTurn === true,
       commandSource: "webchat",
       creation: sessionCreation,
       authorizedPluginId: normalizeOptionalString(client?.internal?.pluginRuntimeOwnerId),
@@ -580,7 +580,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
         if (await worktreeTitle?.persist(agentId, entry, key, storePath)) {
           emitSessionsChanged(context, { sessionKey: key, agentId, reason: "chat.title" });
         }
-        if (hasInitialTurn) {
+        if (hasInitialTurn && p.holdInitialTurn !== true) {
           if (!authority.hasActive()) {
             return;
           }
