@@ -340,6 +340,15 @@ export function ensureSessionEntryValidityProjection(db: DatabaseSync): void {
   }
 }
 
+/** Adds the revision column used by revision-CAS. DEFAULT 0 = pre-revision era; first write bumps to 1. */
+export function ensureSessionRevisionColumn(db: DatabaseSync): void {
+  const columns = readSqliteTableColumns(db, "session_nodes");
+  if (!columns || columns.has("revision")) {
+    return;
+  }
+  db.exec("ALTER TABLE session_nodes ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;");
+}
+
 export function migrateSessionEntryStatusProjection(
   db: DatabaseSync,
   readStatus: (entryJson: unknown) => string | null,

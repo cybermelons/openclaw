@@ -169,6 +169,7 @@ export function ensureTranscriptSessionRoot(
         entry_json: "{}",
         entry_valid: -1,
         updated_at: updatedAt,
+        revision: 1,
       })
       .onConflict((conflict) => conflict.column("session_key").doNothing()),
   );
@@ -177,7 +178,7 @@ export function ensureTranscriptSessionRoot(
       database.db,
       db
         .updateTable("session_nodes")
-        .set({ entry_valid: -1 })
+        .set((eb) => ({ entry_valid: -1, revision: eb("session_nodes.revision", "+", 1) }))
         .where("session_key", "=", scope.sessionKey),
     );
     publishSessionEntryCacheInvalidation(database);

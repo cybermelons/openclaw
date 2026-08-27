@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS session_nodes (
   archived_at INTEGER,
   last_read_at INTEGER,
   last_interaction_at INTEGER,
-  last_activity_at INTEGER
+  last_activity_at INTEGER,
+  revision INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_agent_session_nodes_updated_at

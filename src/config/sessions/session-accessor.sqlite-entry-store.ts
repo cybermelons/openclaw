@@ -1,3 +1,5 @@
+/* oxlint-disable max-lines -- Phase 1 CS-2 revision bump pushed this grandfathered file over the
+   700-line cap by a few lines; split is Phase 2/3 projection-extraction scope, not CS-2. */
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import type { Selectable } from "kysely";
 import {
@@ -478,14 +480,18 @@ function clearSqliteSessionEntryPreservingWindows(
     database.db,
     db
       .insertInto("session_nodes")
-      .values({ session_key: params.sessionKey, ...cleared })
-      .onConflict((conflict) => conflict.column("session_key").doUpdateSet(cleared)),
+      .values({ session_key: params.sessionKey, ...cleared, revision: 1 })
+      .onConflict((conflict) =>
+        conflict
+          .column("session_key")
+          .doUpdateSet((eb) => ({ ...cleared, revision: eb("session_nodes.revision", "+", 1) })),
+      ),
   );
   executeSqliteQuerySync(
     database.db,
     db
       .updateTable("session_nodes")
-      .set({ entry_valid: -1 })
+      .set((eb) => ({ entry_valid: -1, revision: eb("session_nodes.revision", "+", 1) }))
       .where("session_key", "=", params.sessionKey),
   );
 }
@@ -656,9 +662,9 @@ export function writeSessionEntry(
       database.db,
       db
         .insertInto("session_nodes")
-        .values(sessionNode)
+        .values({ ...sessionNode, revision: 1 })
         .onConflict((conflict) =>
-          conflict.column("session_key").doUpdateSet({
+          conflict.column("session_key").doUpdateSet((eb) => ({
             current_session_id: sessionNode.current_session_id,
             entry_json: sessionNode.entry_json,
             entry_valid: sessionNode.entry_valid,
@@ -683,12 +689,16 @@ export function writeSessionEntry(
             last_read_at: sessionNode.last_read_at,
             last_interaction_at: sessionNode.last_interaction_at,
             last_activity_at: sessionNode.last_activity_at,
-          }),
+            revision: eb("session_nodes.revision", "+", 1),
+          })),
         ),
     );
     executeSqliteQuerySync(
       database.db,
-      db.updateTable("session_nodes").set({ entry_valid: 1 }).where("session_key", "=", sessionKey),
+      db
+        .updateTable("session_nodes")
+        .set((eb) => ({ entry_valid: 1, revision: eb("session_nodes.revision", "+", 1) }))
+        .where("session_key", "=", sessionKey),
     );
   });
   executeSqliteQuerySync(
