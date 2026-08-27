@@ -289,6 +289,13 @@ export interface SessionProgressCards {
   updated_at: number;
 }
 
+export interface SessionResumeEpoch {
+  epoch: number;
+  session_key: string;
+  state: string;
+  updated_at: number;
+}
+
 export interface SessionSuggestions {
   author_id: string;
   author_label: string | null;
@@ -503,6 +510,7 @@ export interface DB {
   session_nodes: SessionNodes;
   session_participants: SessionParticipants;
   session_progress_cards: SessionProgressCards;
+  session_resume_epoch: SessionResumeEpoch;
   session_suggestions: SessionSuggestions;
   session_transcript_active_events: SessionTranscriptActiveEvents;
   session_transcript_archives: SessionTranscriptArchives;

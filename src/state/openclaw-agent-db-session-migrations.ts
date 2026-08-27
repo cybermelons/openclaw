@@ -349,6 +349,48 @@ export function ensureSessionRevisionColumn(db: DatabaseSync): void {
   db.exec("ALTER TABLE session_nodes ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;");
 }
 
+/**
+ * Creates the Phase-4 resumption-ordering marker table (PHASE-4.md §3a) and
+ * backfills every existing session as epoch=0, state='drained' so no
+ * pre-Phase-4 session ever reads as drain-pending. Idempotent: safe to
+ * re-run, and re-running never overwrites a row already present.
+ */
+export function ensureSessionResumeEpochTable(db: DatabaseSync): void {
+  const existing = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get("session_resume_epoch");
+  if (!existing) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_resume_epoch (
+        session_key TEXT NOT NULL PRIMARY KEY,
+        epoch INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('drain_pending', 'drained')),
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_agent_session_resume_epoch_state
+        ON session_resume_epoch(session_key)
+        WHERE state = 'drain_pending';
+    `);
+  }
+  if (!readSqliteTableColumns(db, "session_nodes")) {
+    return;
+  }
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS session_resume_epoch_after_session_nodes_insert
+    AFTER INSERT ON session_nodes
+    BEGIN
+      INSERT OR IGNORE INTO session_resume_epoch (session_key, epoch, state, updated_at)
+      VALUES (NEW.session_key, 0, 'drained', NEW.updated_at);
+    END;
+  `);
+  db.exec(`
+    INSERT INTO session_resume_epoch (session_key, epoch, state, updated_at)
+    SELECT session_key, 0, 'drained', ${Date.now()}
+    FROM session_nodes
+    WHERE session_key NOT IN (SELECT session_key FROM session_resume_epoch);
+  `);
+}
+
 export function migrateSessionEntryStatusProjection(
   db: DatabaseSync,
   readStatus: (entryJson: unknown) => string | null,
