@@ -563,7 +563,10 @@ function deleteSqliteSessionStateRows(database: OpenClawAgentDatabase, sessionId
 
 // Plans orphan cleanup without file writes or row deletion; finalization
 // handles archive durability before removing rows.
-function planSqliteOrphanLifecycleTranscriptStateDeletes(params: {
+// Exported for direct testing (Phase 3 §8c blob-reverify pin) — the full
+// planSessionLifecycleArtifactCleanup pipeline requires wiring reclaimability/
+// marker gates that are orthogonal to what this pin proves.
+export function planSqliteOrphanLifecycleTranscriptStateDeletes(params: {
   agentId?: string;
   archiveRemovedEntryTranscripts: boolean;
   archiveDirectory: string;
@@ -591,10 +594,36 @@ function planSqliteOrphanLifecycleTranscriptStateDeletes(params: {
     if (
       !sessionKeyBelongsToAgent(row.session_key, params.agentId) ||
       params.referencedSessionIds.has(row.session_id) ||
-      params.excludedSessionIds?.has(row.session_id) ||
-      (params.pluginOwnerId && row.plugin_owner_id && row.plugin_owner_id !== params.pluginOwnerId)
+      params.excludedSessionIds?.has(row.session_id)
     ) {
       continue;
+    }
+    // §8c: `plugin_owner_id` is a projected column that can diverge from the
+    // owning node's blob. A column-only mismatch must not gate this delete —
+    // re-verify against the owning session_nodes row's blob `pluginOwnerId`
+    // (mirrors planSessionLifecycleArtifactCleanup below, which re-checks
+    // `entry?.pluginOwnerId` rather than trusting a projected column).
+    if (params.pluginOwnerId && row.plugin_owner_id) {
+      const ownerNodeRow = executeSqliteQueryTakeFirstSync(
+        params.database.db,
+        db
+          .selectFrom("session_nodes")
+          .select(["entry_json", "session_key", "current_session_id", "updated_at"])
+          .where("session_key", "=", row.session_key),
+      );
+      // EXCEPTION: if the owning node row is absent or its blob is unparseable/
+      // corrupt, this is a true orphan with no usable blob to re-verify against —
+      // the column is the only signal available, so fall back to the column check.
+      const ownerEntry = ownerNodeRow
+        ? readSessionEntryOrNull(ownerNodeRow.session_key, ownerNodeRow)
+        : undefined;
+      if (ownerEntry) {
+        if (ownerEntry.pluginOwnerId && ownerEntry.pluginOwnerId !== params.pluginOwnerId) {
+          continue;
+        }
+      } else if (row.plugin_owner_id !== params.pluginOwnerId) {
+        continue;
+      }
     }
     if (
       !sqliteTranscriptStateIsReclaimable({
