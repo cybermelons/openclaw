@@ -26,7 +26,7 @@ import {
   type DeliveryContext,
 } from "../../utils/delivery-context.shared.js";
 import { isDeliverableMessageChannel } from "../../utils/message-channel.js";
-import { reconcileCliTranscript } from "../cli-transcript-reconcile.js";
+import { drainTailForResume, reconcileCliTranscript } from "../cli-transcript-reconcile.js";
 import { TOOL_FAILURE_INSTRUCTION } from "../tool-outcome-instructions.js";
 import { buildMainSessionRecoveryClearPatch } from "./main-session-recovery-clear.js";
 import {
@@ -44,11 +44,6 @@ import { commitMainSessionRecovery } from "./main-session-recovery-store.js";
 import { normalizeFiniteTimestamp } from "./main-session-restart-recovery-shared.js";
 
 const log = createSubsystemLogger("main-session-restart-recovery");
-// Bound for the pre-dispatch drain (see call site below): reconcileCliTranscript
-// never throws but has no internal timeout, so a wedged call must not stall
-// recovery — dispatch proceeds anyway once this elapses.
-const PRE_DISPATCH_RECONCILE_TIMEOUT_MS = 5_000;
-const PRE_DISPATCH_RECONCILE_TIMED_OUT = Symbol("pre-dispatch-reconcile-timed-out");
 const RESTART_RECOVERY_RESUME_MESSAGE = formatSystemTurnPrompt(
   "Your previous turn was interrupted by a gateway restart while " +
     "OpenClaw was waiting on tool/model work. Continue from the existing " +
@@ -515,38 +510,20 @@ export async function resumeMainSession(params: {
       await rollbackReservation("cancel_reservation");
       return "skipped";
     }
-    // Drain the interrupted tail into SQLite before dispatch reseeds history
-    // from it: reseed reads SQLite (prepare.ts -> loadCliSessionReseedMessages)
+    // Drain the interrupted tail into SQLite and commit the resume_epoch
+    // marker as "drained" in one transaction before dispatch (PHASE-4.md §4
+    // CS-3): reseed reads SQLite (prepare.ts -> loadCliSessionReseedMessages)
     // at dispatch-time, so a post-dispatch drain is too late to be reseeded.
-    // Best-effort and bounded: reconcileCliTranscript never throws, but it has
-    // no internal timeout, so a wedged call could stall recovery — cap it here
-    // and dispatch anyway on failure or timeout rather than regress a resumed
-    // (if amnesiac) turn into no turn at all.
-    try {
-      const raced = await Promise.race([
-        reconcileCliTranscript({
-          entry: params.entry,
-          sessionKey: params.sessionKey,
-          storePath: params.storePath,
-          reason: "recovery",
-        }),
-        new Promise<typeof PRE_DISPATCH_RECONCILE_TIMED_OUT>((resolve) => {
-          setTimeout(
-            () => resolve(PRE_DISPATCH_RECONCILE_TIMED_OUT),
-            PRE_DISPATCH_RECONCILE_TIMEOUT_MS,
-          ).unref?.();
-        }),
-      ]);
-      if (raced === PRE_DISPATCH_RECONCILE_TIMED_OUT) {
-        log.warn(
-          `pre-dispatch cli transcript reconcile timed out after ${PRE_DISPATCH_RECONCILE_TIMEOUT_MS}ms for ${params.sessionKey}; dispatching anyway`,
-        );
-      }
-    } catch (reconcileError) {
-      log.warn(
-        `pre-dispatch cli transcript reconcile failed for ${params.sessionKey}: ${String(reconcileError)}`,
-      );
-    }
+    // Unlike reconcileCliTranscript, drainTailForResume PROPAGATES errors —
+    // dispatch must never proceed on an uncommitted drain, so a failure here
+    // falls through to the outer catch below and returns "failed" (retried
+    // by the recovery loop) rather than dispatching anyway.
+    await drainTailForResume({
+      entry: params.entry,
+      sessionKey: params.sessionKey,
+      storePath: params.storePath,
+      reason: "recovery",
+    });
     if (params.forceRestartSafeTools) {
       log.info(`dispatching restart-safe recovery for ${params.sessionKey}`);
     }

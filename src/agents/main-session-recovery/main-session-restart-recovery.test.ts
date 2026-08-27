@@ -19,6 +19,7 @@ import {
   loadTranscriptEvents,
   replaceSessionEntry,
 } from "../../config/sessions/session-accessor.js";
+import { readSessionResumeEpoch } from "../../config/sessions/session-accessor.sqlite-resume-epoch-store.js";
 import { resolveAgentRestartRecoveryExecutionIdentityAdmission } from "../../gateway/agent-turn/agent-restart-recovery-context.js";
 import { callGateway } from "../../gateway/call.js";
 import type { GatewayRecoveryRuntime } from "../../gateway/server-instance-runtime.types.js";
@@ -974,6 +975,39 @@ describe("main-session-restart-recovery", () => {
     expect(resumeParams.lane).toBe("main");
     const store = readStore(path.join(sessionsDir, "sessions.json"));
     expect(store["agent:main:main"]?.abortedLastRun).toBe(false);
+  });
+
+  // Phase-4 CS-3 (T1) — resumeMainSession's Site A dispatch is gated on the
+  // drainTailForResume commit: the resume_epoch marker must already read
+  // epoch=1/drained by the time dispatch (callGateway) is observed, and this
+  // session has no bound CLI session, so the marker still commits with zero
+  // drain candidates. See docs/session-rearchitecture/PHASE-4.md §4 CS-3.
+  it("commits the resume_epoch marker before dispatching the resumed turn (zero candidates)", async () => {
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = tmpDir;
+    try {
+      const sessionsDir = await makeSessionsDir();
+      await writeStore(sessionsDir, mainSessionStore());
+      await writeCompletedToolTranscript(sessionsDir);
+
+      let markerAtDispatchTime: ReturnType<typeof readSessionResumeEpoch> | undefined;
+      vi.mocked(callGateway).mockImplementationOnce(async () => {
+        const database = openOpenClawAgentDatabase({ agentId: "main", env: process.env });
+        markerAtDispatchTime = readSessionResumeEpoch(database, "agent:main:main");
+        return { runId: "run-resumed" };
+      });
+
+      await expectRecovery({ recovered: 1, failed: 0, skipped: 0 });
+
+      expect(callGateway).toHaveBeenCalledOnce();
+      expect(markerAtDispatchTime).toMatchObject({ epoch: 1, state: "drained" });
+    } finally {
+      if (previousStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      }
+    }
   });
 
   it("resumes when durable commentary is mirrored after the restart recovery mark", async () => {
