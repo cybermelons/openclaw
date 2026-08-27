@@ -7,10 +7,6 @@ import os from "node:os";
 import path from "node:path";
 import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
-import {
-  formatActiveNodeContextLabel,
-  getCurrentActiveNodeContext,
-} from "../../infra/active-node-context.js";
 import { getMachineDisplayName } from "../../infra/machine-name.js";
 import { resolveRuntimeOsLabel } from "../../infra/os-summary.js";
 import { listRegisteredPluginAgentPromptGuidance } from "../../plugins/command-registry-state.js";
@@ -44,7 +40,6 @@ import {
   resolveChannelReactionGuidance,
 } from "../channel-tools.js";
 import { resolveConversationCapabilityProfile } from "../conversation-capability-profile.js";
-import { formatDateStamp, resolveUserTimezone } from "../date-time.js";
 import { resolveOpenClawReferencePaths } from "../docs-path.js";
 import { prepareAgentMemoryPrompt } from "../memory-prompt-prepare.js";
 import {
@@ -52,6 +47,7 @@ import {
   applyLocalNoAuthHeaderOverride,
   resolveModelAuthMode,
 } from "../model-auth.js";
+import { resolveDefaultModelForAgent } from "../model-selection.js";
 import { supportsModelTools } from "../model-tool-support.js";
 import { resolveAgentPromptSurfaceForSessionKey } from "../prompt-surface.js";
 import { collectRuntimeChannelCapabilities } from "../runtime-capabilities.js";
@@ -59,6 +55,7 @@ import { buildAgentRuntimePlan } from "../runtime-plan/build.js";
 import type { AgentRuntimePlan } from "../runtime-plan/types.js";
 import { resolveSessionPermissionExecMode } from "../session-permission-exec-mode.js";
 import { detectRuntimeShell } from "../shell-utils.js";
+import { buildSystemPromptParams } from "../system-prompt-params.js";
 import { toolPolicyRestrictsTools } from "../tool-policy.js";
 import {
   filterProviderNormalizableTools,
@@ -513,27 +510,40 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
         })
       : undefined;
 
-    const runtimeInfo = {
+    const defaultModelRef = resolveDefaultModelForAgent({
+      cfg: params.config ?? {},
       agentId: sessionAgentId,
-      sessionKey: params.sessionKey,
-      host: machineName,
-      os: resolveRuntimeOsLabel(),
-      arch: os.arch(),
-      node: process.version,
-      model: `${provider}/${modelId}`,
-      shell: detectRuntimeShell(),
-      channel: runtimeChannel,
-      chatType: params.chatType,
-      capabilities: runtimeCapabilities,
-      channelActions,
-      activeProcessSessions: listActiveProcessSessionReferences({
-        scopeKey: resolveProcessToolScopeKey({
-          sessionKey: sandboxSessionKey,
-          agentId: sessionAgentId,
+    });
+    const { runtimeInfo, userTimezone, userDate } = buildSystemPromptParams({
+      config: params.config,
+      agentId: sessionAgentId,
+      workspaceDir: effectiveWorkspace,
+      cwd: effectiveCwd,
+      ...(params.preparedModelRuntime && Object.hasOwn(params.preparedModelRuntime, "repoRoot")
+        ? { preparedRepoRoot: params.preparedModelRuntime.repoRoot }
+        : {}),
+      runtime: {
+        sessionKey: params.sessionKey,
+        sessionId: params.sessionId,
+        host: machineName,
+        os: resolveRuntimeOsLabel(),
+        arch: os.arch(),
+        node: process.version,
+        model: `${provider}/${modelId}`,
+        defaultModel: `${defaultModelRef.provider}/${defaultModelRef.model}`,
+        shell: detectRuntimeShell(),
+        channel: runtimeChannel,
+        chatType: params.chatType,
+        capabilities: runtimeCapabilities,
+        channelActions,
+        activeProcessSessions: listActiveProcessSessionReferences({
+          scopeKey: resolveProcessToolScopeKey({
+            sessionKey: sandboxSessionKey,
+            agentId: sessionAgentId,
+          }),
         }),
-      }),
-      activeNode: formatActiveNodeContextLabel(getCurrentActiveNodeContext()),
-    };
+      },
+    });
     const sandboxInfoExecPolicy = resolveEmbeddedSandboxInfoExecPolicy({
       config: params.config,
       agentId: sessionAgentId,
@@ -555,8 +565,6 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       modelApi: effectiveModel.api,
       model: effectiveModel,
     });
-    const userTimezone = resolveUserTimezone(params.config?.agents?.defaults?.userTimezone);
-    const userDate = formatDateStamp(Date.now(), userTimezone);
     const promptSurface = resolveAgentPromptSurfaceForSessionKey(params.sessionKey);
     const promptMode = promptPolicyRestricted
       ? "minimal"
