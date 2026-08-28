@@ -191,6 +191,40 @@ describe("assertSqliteSchemaContains", () => {
     }
   });
 
+  it("accepts a compatible future additive column on a present allowed-missing table (issue #7)", () => {
+    // A lazy-additive table (present because an older build already ensured
+    // it) must get the same forward-compatible column tolerance as any other
+    // table. Gating tolerance on allowedMissingTables membership refused a
+    // downgrade open even for a bare nullable STRICT column.
+    const database = createDatabase(CANONICAL_SCHEMA);
+    try {
+      database.exec("ALTER TABLE compatible_columns ADD COLUMN future_note TEXT;");
+
+      expect(() =>
+        assertSqliteSchemaContains(database, "test database", CANONICAL_SCHEMA, {
+          allowCompatibleAdditiveColumns: true,
+          allowedMissingTables: ["compatible_columns"],
+        }),
+      ).not.toThrow();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("still rejects an incompatible future column on a present allowed-missing table", () => {
+    const database = createDatabase(schemaWithFutureColumn("TEXT NOT NULL DEFAULT ''"));
+    try {
+      expect(() =>
+        assertSqliteSchemaContains(database, "test database", CANONICAL_SCHEMA, {
+          allowCompatibleAdditiveColumns: true,
+          allowedMissingTables: ["compatible_columns"],
+        }),
+      ).toThrow("column definitions differ for compatible_columns");
+    } finally {
+      database.close();
+    }
+  });
+
   it("keeps allowlisted missing additive columns compatible in the upgrade direction", () => {
     const futureSchema = CANONICAL_SCHEMA.replace(
       "    value TEXT\n  ) STRICT;",
@@ -245,6 +279,49 @@ describe("assertSqliteSchemaContains", () => {
       ).not.toThrow();
     } finally {
       database.close();
+    }
+  });
+
+  it("gives missing-column, unexpected-column, and column-definition-drift distinct messages", () => {
+    // Fact 5 from issue #7: one shared message string served all three codes,
+    // so an operator could not tell which fault actually occurred. Each code
+    // must now report which one it is, and drift must show both definitions.
+    const missingColumnSchema = CANONICAL_SCHEMA.replace(
+      "    value TEXT NOT NULL CHECK (length(value) > 0)\n  );\n  CREATE TABLE other_parents",
+      "    value TEXT NOT NULL CHECK (length(value) > 0),\n    extra_note TEXT\n  );\n  CREATE TABLE other_parents",
+    );
+    const unexpectedColumnDatabase = createDatabase(CANONICAL_SCHEMA);
+    const missingColumnDatabase = createDatabase(CANONICAL_SCHEMA);
+    const driftedColumnDatabase = createDatabase(
+      CANONICAL_SCHEMA.replace("value TEXT NOT NULL", "value BLOB NOT NULL"),
+    );
+    try {
+      unexpectedColumnDatabase.exec("ALTER TABLE compatible_columns ADD COLUMN future_note TEXT;");
+
+      const unexpected = collectSqliteSchemaIssues(unexpectedColumnDatabase, CANONICAL_SCHEMA).find(
+        (issue) => issue.code === "unexpected-column",
+      );
+      const missing = collectSqliteSchemaIssues(missingColumnDatabase, missingColumnSchema).find(
+        (issue) => issue.code === "missing-column",
+      );
+      const drifted = collectSqliteSchemaIssues(driftedColumnDatabase, CANONICAL_SCHEMA).find(
+        (issue) => issue.code === "column-definition-drift",
+      );
+
+      expect(unexpected?.message).toContain("unexpected column compatible_columns.future_note");
+      expect(missing?.message).toContain("missing column parents.extra_note");
+      expect(drifted?.message).toContain("column definition differs for parents.value");
+      expect(drifted?.message).toContain('expected "value TEXT NOT NULL');
+      expect(drifted?.message).toContain('found "value BLOB NOT NULL');
+
+      const messages = new Set(
+        [unexpected?.message, missing?.message, drifted?.message].filter(Boolean),
+      );
+      expect(messages.size).toBe(3);
+    } finally {
+      unexpectedColumnDatabase.close();
+      missingColumnDatabase.close();
+      driftedColumnDatabase.close();
     }
   });
 

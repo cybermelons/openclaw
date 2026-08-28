@@ -5931,6 +5931,108 @@ INSERT INTO macos_port_guardian_records VALUES (4242, 18789, '/usr/bin/ssh', 're
     expect(openOpenClawStateDatabase(options).db.isOpen).toBe(true);
   });
 
+  it("tolerates a compatible additive column on a lazy-additive table without repair (issue #7)", () => {
+    // skill_workshop_proposals and worker_session_placement_moves are lazy-
+    // additive tables. A newer build's compatible additive column on either
+    // must not force a normal open (or doctor --fix) to refuse.
+    const stateDir = createTempStateDir();
+    const options = { env: { OPENCLAW_STATE_DIR: stateDir } };
+    const databasePath = openOpenClawStateDatabase(options).path;
+    closeOpenClawStateDatabaseForTest();
+    const { DatabaseSync } = requireNodeSqlite();
+    const db = new DatabaseSync(databasePath);
+    try {
+      db.exec(
+        "ALTER TABLE skill_workshop_proposals ADD COLUMN future_note TEXT;" +
+          "ALTER TABLE worker_session_placement_moves ADD COLUMN future_flag INTEGER;",
+      );
+    } finally {
+      db.close();
+    }
+
+    expect(openOpenClawStateDatabase(options).db.isOpen).toBe(true);
+    closeOpenClawStateDatabaseForTest();
+    expect(repairOpenClawStateDatabaseSchemaIfNeeded(options)).toEqual({
+      changes: [],
+      warnings: [],
+    });
+  });
+
+  it("still refuses an incompatible additive column on a lazy-additive table with actionable guidance", () => {
+    const stateDir = createTempStateDir();
+    const options = { env: { OPENCLAW_STATE_DIR: stateDir } };
+    const databasePath = openOpenClawStateDatabase(options).path;
+    closeOpenClawStateDatabaseForTest();
+    const { DatabaseSync } = requireNodeSqlite();
+    const db = new DatabaseSync(databasePath);
+    try {
+      db.exec(
+        "ALTER TABLE skill_workshop_proposals ADD COLUMN future_required TEXT NOT NULL DEFAULT '';",
+      );
+    } finally {
+      db.close();
+    }
+
+    expect(() => openOpenClawStateDatabase(options)).toThrow(
+      /column definitions differ for skill_workshop_proposals/u,
+    );
+    closeOpenClawStateDatabaseForTest();
+
+    // doctor --fix must not claim rerunning itself will help: no forward
+    // repair drops or coerces a live column. It must point at the two paths
+    // that can actually resolve a noncanonical column shape.
+    const result = repairOpenClawStateDatabaseSchema(options);
+    expect(result.changes).toEqual([]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("column definitions differ for skill_workshop_proposals");
+    expect(result.warnings[0]).toContain("Upgrade to a build that supports this schema");
+    expect(result.warnings[0]).toContain("restore the database from a backup");
+    expect(result.warnings[0]).not.toMatch(/run openclaw doctor --fix/u);
+  });
+
+  it("never lowers the stored schema version when a downgrade open is refused", () => {
+    const stateDir = createTempStateDir();
+    const options = { env: { OPENCLAW_STATE_DIR: stateDir } };
+    const databasePath = openOpenClawStateDatabase(options).path;
+    closeOpenClawStateDatabaseForTest();
+    const { DatabaseSync } = requireNodeSqlite();
+    const db = new DatabaseSync(databasePath);
+    try {
+      db.exec(`PRAGMA user_version = ${OPENCLAW_STATE_SCHEMA_VERSION + 1};`);
+      db.prepare("UPDATE schema_meta SET schema_version = ? WHERE meta_key = 'primary'").run(
+        OPENCLAW_STATE_SCHEMA_VERSION + 1,
+      );
+    } finally {
+      db.close();
+    }
+
+    let openFailure: unknown;
+    try {
+      openOpenClawStateDatabase(options);
+    } catch (error) {
+      openFailure = error;
+    }
+    expect(openFailure).toMatchObject({ name: "SqliteSchemaVersionError" });
+    clearOpenClawStateDatabaseOpenFailure(databasePath);
+    const result = repairOpenClawStateDatabaseSchema(options);
+    expect(result.changes).toEqual([]);
+    expect(result.warnings[0]).toMatch(/uses newer schema version/u);
+
+    const preserved = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      expect(readSqliteNumberPragma(preserved, "user_version")).toBe(
+        OPENCLAW_STATE_SCHEMA_VERSION + 1,
+      );
+      expect(
+        preserved
+          .prepare("SELECT schema_version FROM schema_meta WHERE meta_key = 'primary'")
+          .get(),
+      ).toEqual({ schema_version: OPENCLAW_STATE_SCHEMA_VERSION + 1 });
+    } finally {
+      preserved.close();
+    }
+  });
+
   it("does not chmod shared parent directories for explicit database paths", () => {
     const databasePath = path.join(
       os.tmpdir(),

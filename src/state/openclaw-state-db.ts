@@ -23,6 +23,7 @@ import {
 } from "../infra/sqlite-integrity.js";
 import { prepareSqliteReadOnlyLocation } from "../infra/sqlite-readonly-location.js";
 import { assertSqliteSchemaTablesPresent } from "../infra/sqlite-schema-contract.js";
+import { describeUnrepairableOpenClawStateSchemaRepairFailure } from "../infra/sqlite-schema-issues.js";
 import { migrateSqliteSchemaToStrictInTransaction } from "../infra/sqlite-strict.js";
 import {
   isSqliteCorruptionError,
@@ -286,12 +287,7 @@ function repairOpenClawStateDatabaseSchemaWithWriteAccess(
       ownershipRefused = true;
       throw err;
     }
-    // Reaching this catch inside doctor means repair itself refused or failed,
-    // so the runtime asserts' "run openclaw doctor --fix" advice is circular here.
-    const reason = String(err).replace(
-      /has a legacy ([a-z ]+) schema; run openclaw doctor --fix to migrate it\./u,
-      "has a legacy $1 schema; automatic repair refused the unrecognized schema shape.",
-    );
+    const reason = describeUnrepairableOpenClawStateSchemaRepairFailure(err);
     return {
       changes: [],
       warnings: [`Failed migrating shared state database schema at ${pathname}: ${reason}`],
