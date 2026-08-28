@@ -393,11 +393,15 @@ export function removeQueuedMessageWithoutReleasing(
   if (
     item &&
     stored &&
+    // Match the version gate against the durable row, not the live projection
+    // overlay: an in-flight steer shows a "steering" chip while its durable row
+    // was claimed to "unconfirmed", so passing the overlay here spuriously fails
+    // the gate and leaves the durable row behind for the abort-path replay (#54).
     !removeStoredChatComposerQueueItem(
       host,
       stored.sessionKey,
       id,
-      item,
+      storedItem ?? item,
       stored.agentId ?? item.agentId,
     )
   ) {
