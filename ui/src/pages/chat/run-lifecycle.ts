@@ -289,12 +289,21 @@ function currentChatAbortIntent(
   // (e.g. a freshly started run with no row yet): fall back to today's local
   // optimism rather than losing the ability to stop it. Mirrors
   // hasAbortableSessionRun's "no server row to disprove it" fallback.
+  //
+  // When a client-held chatRunId exists but the server does not list it, it is
+  // stale; substitute the single live run so Stop still targets a real run.
+  // That substitution is gated on a stale id EXISTING: an ABSENT chatRunId
+  // (e.g. a channel reply with no browser-local run) must fall through to
+  // session-wide sessions.abort {clearQueued}, which also clears queued
+  // followups. Promoting an absent id to an exact-run chat.abort would leave
+  // the queue intact and let a followup run after Stop — the silent
+  // "Stop didn't stop" class this resolver exists to prevent.
   const exactRunId =
     rows.length === 0
       ? trimmed
       : trimmed && runIds.has(trimmed)
         ? trimmed
-        : runIds.size === 1
+        : trimmed && runIds.size === 1
           ? [...runIds][0]
           : undefined;
   return exactRunId
