@@ -36,22 +36,24 @@ describe("createGatewayControlUiRootLifecycle", () => {
     enabled?: boolean;
     override?: string;
     warn?: ReturnType<typeof vi.fn<(message: string) => void>>;
+    error?: ReturnType<typeof vi.fn<(message: string) => void>>;
   }) {
     const gatewayRuntime = { log: vi.fn() };
     const warn = options?.warn ?? vi.fn<(message: string) => void>();
+    const error = options?.error ?? vi.fn<(message: string) => void>();
     const lifecycle = createGatewayControlUiRootLifecycle({
       ...(options?.override ? { controlUiRootOverride: options.override } : {}),
       controlUiEnabled: options?.enabled ?? true,
       gatewayRuntime: gatewayRuntime as never,
-      log: { warn },
+      log: { warn, error },
     });
-    return { lifecycle, gatewayRuntime, warn };
+    return { lifecycle, gatewayRuntime, warn, error };
   }
 
   test("prepares resolved roots without scheduling a build", () => {
     controlUiAssetsMocks.resolveControlUiRootSync.mockReturnValue("/repo/dist/control-ui");
 
-    const { lifecycle } = createLifecycle();
+    const { lifecycle, error } = createLifecycle();
 
     expect(lifecycle.state).toEqual({
       kind: "resolved",
@@ -59,6 +61,7 @@ describe("createGatewayControlUiRootLifecycle", () => {
       realPath: "/repo/dist/control-ui",
     });
     expect(controlUiAssetsMocks.ensureControlUiAssetsBuilt).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   test("rebuilds incomplete auto-discovered roots before publishing them", async () => {
@@ -106,7 +109,7 @@ describe("createGatewayControlUiRootLifecycle", () => {
         finishBuild = () => resolve({ ok: true, built: true });
       }),
     );
-    const { lifecycle, gatewayRuntime, warn } = createLifecycle();
+    const { lifecycle, gatewayRuntime, warn, error } = createLifecycle();
     const rootReference = lifecycle.state;
     const controller = new AbortController();
 
@@ -133,13 +136,14 @@ describe("createGatewayControlUiRootLifecycle", () => {
       realPath: "/repo/dist/control-ui",
     });
     expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   test("keeps configured roots unbundled even when their package path is proven", () => {
     controlUiAssetsMocks.resolveControlUiRootOverrideSync.mockReturnValue("/custom/ui");
     controlUiAssetsMocks.isPackageProvenControlUiRootSync.mockReturnValue(true);
 
-    const { lifecycle } = createLifecycle({ override: "/custom/ui" });
+    const { lifecycle, error } = createLifecycle({ override: "/custom/ui" });
 
     expect(lifecycle.state).toEqual({
       kind: "resolved",
@@ -148,6 +152,7 @@ describe("createGatewayControlUiRootLifecycle", () => {
     });
     expect(controlUiAssetsMocks.ensureControlUiAssetsBuilt).not.toHaveBeenCalled();
     expect(controlUiAssetsMocks.isControlUiStartupAssetsReady).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   test("keeps invalid configured roots terminal without starting a default build", () => {
@@ -228,7 +233,7 @@ describe("createGatewayControlUiRootLifecycle", () => {
         finishBuild = () => resolve({ ok: true, built: true });
       }),
     );
-    const { lifecycle, warn } = createLifecycle();
+    const { lifecycle, warn, error } = createLifecycle();
     const controller = new AbortController();
     const build = lifecycle.start(() => false, controller.signal);
 
@@ -239,6 +244,7 @@ describe("createGatewayControlUiRootLifecycle", () => {
 
     expect(lifecycle.state).toEqual({ kind: "preparing" });
     expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   test("fails when a successful build still cannot resolve an effective root", async () => {

@@ -156,7 +156,7 @@ describe("resolveControlUiBuildSkew", () => {
     expect(skew).toBeNull();
   });
 
-  it("re-reads after the file changes once the mtime cache is reset", () => {
+  it("stays cached until resetControlUiBuildSkewCacheForTest forces a re-read", () => {
     writeServiceWorker("ui-build-1");
     const first = resolveControlUiBuildSkew({
       controlUiRoot: tempDir,
@@ -180,5 +180,40 @@ describe("resolveControlUiBuildSkew", () => {
       gatewayBuildId: "gateway-build-1",
     });
     expect(afterReset).toBeNull();
+  });
+
+  it("invalidates the mtime cache on a real on-disk rewrite, no reset call", () => {
+    // This is the actual "someone rebuilds the UI while the gateway keeps
+    // running" path the connect-session.ts call site exists for: no test
+    // helper resets the cache, the file changes under the running process.
+    //
+    // The cache keys on (mtimeMs, size). Some filesystems/CI runners carry
+    // coarse (~1s) mtime resolution, so a same-tick rewrite could keep an
+    // identical mtimeMs and be missed on mtime alone. We defend on both axes
+    // so the assertion is deterministic regardless of filesystem: the second
+    // write uses a longer build id string (size changes), and we additionally
+    // set an explicit future mtime with fs.utimesSync (mtime changes too).
+    writeServiceWorker("build-a");
+    const first = resolveControlUiBuildSkew({
+      controlUiRoot: tempDir,
+      gatewayBuildId: "gateway-build-1",
+    });
+    expect(first).toEqual({ uiBuildId: "build-a", gatewayBuildId: "gateway-build-1" });
+
+    writeServiceWorker("build-b-longer-id");
+    const swPath = path.join(tempDir, "sw.js");
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(swPath, future, future);
+
+    // No resetControlUiBuildSkewCacheForTest call: the mtime/size check on
+    // the stat alone must be what invalidates the cached entry here.
+    const afterRewrite = resolveControlUiBuildSkew({
+      controlUiRoot: tempDir,
+      gatewayBuildId: "gateway-build-1",
+    });
+    expect(afterRewrite).toEqual({
+      uiBuildId: "build-b-longer-id",
+      gatewayBuildId: "gateway-build-1",
+    });
   });
 });
