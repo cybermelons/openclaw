@@ -34,6 +34,10 @@ import { resolveRuntimeServiceBuildId, resolveRuntimeServiceVersion } from "../.
 import { verifyAgentRuntimeIdentityToken } from "../../agent-runtime-identity-token.js";
 import { buildAuthenticatedPresenceUser } from "../../authenticated-presence-user.js";
 import {
+  formatControlUiBuildSkewMessage,
+  resolveControlUiBuildSkew,
+} from "../../control-ui-build-skew.js";
+import {
   attachGatewayLocalUserIngress,
   prepareGatewayLocalUserIngress,
 } from "../../local-user-ingress.js";
@@ -342,6 +346,16 @@ export async function attachAuthenticatedGatewayConnect(
     logWsControl.warn(
       `control ui build rejected conn=${connId} clientBuild=${formatForLog(controlUiBuildMismatch.clientBuildId ?? "legacy")} gatewayBuild=${formatForLog(controlUiBuildMismatch.gatewayBuildId)}; reload required`,
     );
+    // A reload cannot clear a mismatch that lives on disk: when dist/ holds two
+    // builds the gateway serves the exact UI it rejects (#6). Name that here,
+    // where the operator is already reading the repeating rejection.
+    const controlUiBuildSkew = resolveControlUiBuildSkew({
+      configuredControlUiRoot: context.configSnapshot.gateway?.controlUi?.root,
+      gatewayBuildId: controlUiBuildMismatch.gatewayBuildId,
+    });
+    if (controlUiBuildSkew) {
+      logWsControl.error(`control ui ${formatControlUiBuildSkewMessage(controlUiBuildSkew)}`);
+    }
     await releasePendingNodePairingCleanup();
     close(1008, truncateCloseReason(message));
     return;
