@@ -3,6 +3,7 @@
  * prepared direct compaction attempt.
  */
 import os from "node:os";
+import path from "node:path";
 import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import {
@@ -56,6 +57,7 @@ import { collectRuntimeChannelCapabilities } from "../runtime-capabilities.js";
 import { buildAgentRuntimePlan } from "../runtime-plan/build.js";
 import type { AgentRuntimePlan } from "../runtime-plan/types.js";
 import { detectRuntimeShell } from "../shell-utils.js";
+import { resolveSystemPromptRepoRoot } from "../system-prompt-params.js";
 import {
   filterProviderNormalizableTools,
   filterRuntimeCompatibleTools,
@@ -474,6 +476,19 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
         })
       : undefined;
 
+    // Compaction builds runtimeInfo inline (not via buildSystemPromptParams), so repoRoot and
+    // cwd are resolved the same way the live path does to keep the Runtime line byte-identical
+    // across compaction (see cached-prompt-prefix note below). Mirror the live path's precedence
+    // (attempt-system-prompt-prepare.ts): prefer a prepared repoRoot when present, even if null.
+    const compactionRepoRoot =
+      params.preparedModelRuntime && Object.hasOwn(params.preparedModelRuntime, "repoRoot")
+        ? (params.preparedModelRuntime.repoRoot ?? undefined)
+        : resolveSystemPromptRepoRoot({
+            config: params.config,
+            workspaceDir: effectiveWorkspace,
+            cwd: effectiveCwd,
+          });
+    const compactionCwd = effectiveCwd?.trim() ? path.resolve(effectiveCwd) : undefined;
     const runtimeInfo = {
       agentId: sessionAgentId,
       sessionKey: params.sessionKey,
@@ -486,6 +501,9 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       channel: runtimeChannel,
       chatType: params.chatType,
       capabilities: runtimeCapabilities,
+      repoRoot: compactionRepoRoot,
+      // Authoritative working directory the model should treat as "here"; survives compaction.
+      cwd: compactionCwd,
       channelActions,
       activeProcessSessions: listActiveProcessSessionReferences({
         scopeKey: resolveProcessToolScopeKey({
