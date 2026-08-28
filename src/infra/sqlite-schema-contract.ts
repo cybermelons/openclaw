@@ -135,7 +135,6 @@ export function collectSqliteSchemaIssues(
         actualTable.definition,
         expectedTable.definition,
         compatibility,
-        !allowedMissingTables.has(tableName),
       ),
     );
     for (const expectedIndex of expectedTable.indexes) {
@@ -449,11 +448,10 @@ function compareTableDefinitions(
   actual: SqliteTableDefinition | null,
   expected: SqliteTableDefinition | null,
   compatibility: SqliteSchemaCompatibility,
-  allowCompatibleAdditiveColumns: boolean,
 ): SqliteSchemaIssue[] {
   const issues: SqliteSchemaIssue[] = [];
-  const add = (code: SqliteSchemaIssueCode, objectName: string) => {
-    issues.push(createSqliteSchemaIssue(code, objectName));
+  const add = (code: SqliteSchemaIssueCode, objectName: string, message?: string) => {
+    issues.push(createSqliteSchemaIssue(code, objectName, message));
   };
   if (!actual || !expected) {
     if (actual !== expected) {
@@ -464,15 +462,22 @@ function compareTableDefinitions(
   const allowedMissingColumns = new Set(compatibility.allowedMissingColumns ?? []);
   for (const [columnName, definition] of actual.columns) {
     if (!expected.columns.has(columnName)) {
+      // Additive-column tolerance is independent of whether this table may
+      // also be absent (allowedMissingTables): a present lazy-additive table
+      // still needs the same forward-compatible column allowance as any
+      // other canonical table.
       if (
-        allowCompatibleAdditiveColumns &&
         compatibility.allowCompatibleAdditiveColumns &&
         isCompatibleAdditiveColumnDefinition(definition)
       ) {
         continue;
       }
       const objectName = `${tableName}.${columnName}`;
-      add("unexpected-column", objectName);
+      add(
+        "unexpected-column",
+        objectName,
+        `column definitions differ for ${tableName}: unexpected column ${objectName}: found "${definition}"`,
+      );
     }
   }
   for (const [columnName, expectedDefinition] of expected.columns) {
@@ -480,7 +485,11 @@ function compareTableDefinitions(
     const actualDefinition = actual.columns.get(columnName);
     if (actualDefinition === undefined) {
       if (!allowedMissingColumns.has(objectName)) {
-        add("missing-column", objectName);
+        add(
+          "missing-column",
+          objectName,
+          `column definitions differ for ${tableName}: missing column ${objectName}: expected "${expectedDefinition}"`,
+        );
       }
       continue;
     }
@@ -489,7 +498,11 @@ function compareTableDefinitions(
     }
     const allowed = compatibility.allowedColumnDefinitions?.[objectName] ?? [];
     if (!allowed.some((definition) => normalizeSqlWhitespace(definition) === actualDefinition)) {
-      add("column-definition-drift", objectName);
+      add(
+        "column-definition-drift",
+        objectName,
+        `column definitions differ for ${tableName}: column definition differs for ${objectName}: expected "${expectedDefinition}", found "${actualDefinition}"`,
+      );
     }
   }
   if (!isEqual(actual.constraints, expected.constraints)) {

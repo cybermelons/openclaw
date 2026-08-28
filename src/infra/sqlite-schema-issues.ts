@@ -56,14 +56,21 @@ export type SqliteSchemaCompatibility = {
 };
 
 function defaultIssueMessage(code: SqliteSchemaIssueCode, objectName: string): string {
-  const tableName = objectName.split(".", 1)[0];
   switch (code) {
     case "missing-table":
       return `missing table ${objectName}`;
-    case "missing-column":
-    case "unexpected-column":
-    case "column-definition-drift":
-      return `column definitions differ for ${tableName}`;
+    case "missing-column": {
+      const tableName = objectName.split(".", 1)[0];
+      return `column definitions differ for ${tableName}: missing column ${objectName}`;
+    }
+    case "unexpected-column": {
+      const tableName = objectName.split(".", 1)[0];
+      return `column definitions differ for ${tableName}: unexpected column ${objectName}`;
+    }
+    case "column-definition-drift": {
+      const tableName = objectName.split(".", 1)[0];
+      return `column definitions differ for ${tableName}: column definition differs for ${objectName}`;
+    }
     case "table-constraint-drift":
       return `table constraints differ for ${objectName}`;
     case "table-definition-drift":
@@ -111,6 +118,26 @@ export function legacySqliteSchemaIssueMessages(issues: readonly SqliteSchemaIss
         .map((issue) => issue.message),
     ),
   ];
+}
+
+/**
+ * Rewrite a failed shared-state schema repair's caught error into an honest
+ * reason. Reaching this after doctor's own repair attempt means the runtime
+ * asserts' "run doctor --fix" advice would be circular:
+ *  - a legacy-schema shape repair refused is reworded to say so plainly;
+ *  - a noncanonical column shape (missing, unexpected, or drifted) has no
+ *    forward repair, since dropping or coercing a live column risks data
+ *    this or a future build still needs, so this states the two paths that
+ *    can actually resolve it instead.
+ */
+export function describeUnrepairableOpenClawStateSchemaRepairFailure(error: unknown): string {
+  const reason = String(error).replace(
+    /has a legacy ([a-z ]+) schema; run openclaw doctor --fix to migrate it\./u,
+    "has a legacy $1 schema; automatic repair refused the unrecognized schema shape.",
+  );
+  return /column definitions differ for/u.test(reason)
+    ? `${reason} No automatic repair exists for this column shape. Upgrade to a build that supports this schema, or restore the database from a backup.`
+    : reason;
 }
 
 export function throwSqliteSchemaMismatches(

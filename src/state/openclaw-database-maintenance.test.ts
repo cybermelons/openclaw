@@ -356,7 +356,10 @@ describe("OpenClaw database maintenance schema validation", () => {
           }),
         ).not.toThrow();
 
-        const driftedTableSql = canonicalTable.sql.replace("(\n", "(\n  unexpected TEXT,\n");
+        const driftedTableSql = canonicalTable.sql.replace(
+          "(\n",
+          "(\n  unexpected TEXT NOT NULL DEFAULT '',\n",
+        );
         expect(driftedTableSql).not.toBe(canonicalTable.sql);
         database.exec(driftedTableSql);
 
@@ -365,6 +368,27 @@ describe("OpenClaw database maintenance schema validation", () => {
             pathname: "global.sqlite",
           }),
         ).toThrow(`column definitions differ for ${tableName}`);
+      } finally {
+        database.close();
+      }
+    },
+  );
+
+  it.each(["node_worker_launches", "worker_environment_ssh_fallback_ports"])(
+    "tolerates a compatible additive column on present lazy table %s (issue #7)",
+    (tableName) => {
+      // Issue #7: a present lazy-additive table must get the same
+      // forward-compatible column tolerance as any other canonical table -
+      // tolerance must not depend on allowedMissingTables membership.
+      const database = createGlobalDatabase();
+      try {
+        database.exec(`ALTER TABLE ${tableName} ADD COLUMN future_note TEXT;`);
+
+        expect(() =>
+          assertOpenClawStateDatabaseForMaintenance(database, {
+            pathname: "global.sqlite",
+          }),
+        ).not.toThrow();
       } finally {
         database.close();
       }

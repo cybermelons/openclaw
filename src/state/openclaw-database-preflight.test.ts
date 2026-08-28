@@ -147,6 +147,100 @@ describe("OpenClaw database schema preflight", () => {
     expect(snapshotSourceFamily(databasePath)).toEqual(before);
   });
 
+  it("accepts a future bare nullable column on a lazy-additive table (issue #7 downgrade)", async () => {
+    // skill_workshop_proposals and worker_session_placement_moves are lazy-
+    // additive tables (allowedMissingTables). An older build reopening a
+    // database a newer build already wrote sees them present with an extra
+    // compatible column, not missing. Tolerance must not depend on that
+    // table also being allowed-missing.
+    const sourcePath = createExplicitStateDatabase();
+    const databasePath = path.join(
+      tempDirs.make("openclaw-copied-lazy-additive-state-preflight-"),
+      "candidate.sqlite",
+    );
+    fs.copyFileSync(sourcePath, databasePath);
+    const { DatabaseSync } = requireNodeSqlite();
+    const database = new DatabaseSync(databasePath);
+    try {
+      database.exec(
+        "ALTER TABLE skill_workshop_proposals ADD COLUMN future_note TEXT;" +
+          "ALTER TABLE worker_session_placement_moves ADD COLUMN future_flag INTEGER;",
+      );
+    } finally {
+      database.close();
+    }
+    const before = snapshotSourceFamily(databasePath);
+
+    await expect(preflightOpenClawStateDatabasePath(databasePath)).resolves.toEqual({
+      schema: "openclaw.state-schema-preflight.v1",
+      databasePath,
+      targetVersion: OPENCLAW_STATE_SCHEMA_VERSION,
+      foundVersion: OPENCLAW_STATE_SCHEMA_VERSION,
+      ownership: null,
+      status: "exact",
+      requiresWrite: false,
+      issues: [],
+    });
+    expect(snapshotSourceFamily(databasePath)).toEqual(before);
+  });
+
+  it("still refuses a genuinely drifted column on a lazy-additive table", async () => {
+    const sourcePath = createExplicitStateDatabase();
+    const databasePath = path.join(
+      tempDirs.make("openclaw-copied-lazy-additive-drift-preflight-"),
+      "candidate.sqlite",
+    );
+    fs.copyFileSync(sourcePath, databasePath);
+    const { DatabaseSync } = requireNodeSqlite();
+    const database = new DatabaseSync(databasePath);
+    try {
+      database.exec(
+        "ALTER TABLE skill_workshop_proposals DROP COLUMN status_reason;" +
+          "ALTER TABLE skill_workshop_proposals ADD COLUMN status_reason INTEGER;",
+      );
+    } finally {
+      database.close();
+    }
+
+    await expect(preflightOpenClawStateDatabasePath(databasePath)).resolves.toMatchObject({
+      status: "incompatible",
+      issues: [
+        expect.objectContaining({
+          code: "column-definition-drift",
+          objectName: "skill_workshop_proposals.status_reason",
+        }),
+      ],
+    });
+  });
+
+  it("still refuses a NOT NULL unexpected column on a lazy-additive table", async () => {
+    const sourcePath = createExplicitStateDatabase();
+    const databasePath = path.join(
+      tempDirs.make("openclaw-copied-lazy-additive-notnull-preflight-"),
+      "candidate.sqlite",
+    );
+    fs.copyFileSync(sourcePath, databasePath);
+    const { DatabaseSync } = requireNodeSqlite();
+    const database = new DatabaseSync(databasePath);
+    try {
+      database.exec(
+        "ALTER TABLE worker_session_placement_moves ADD COLUMN future_required TEXT NOT NULL DEFAULT '';",
+      );
+    } finally {
+      database.close();
+    }
+
+    await expect(preflightOpenClawStateDatabasePath(databasePath)).resolves.toMatchObject({
+      status: "incompatible",
+      issues: [
+        expect.objectContaining({
+          code: "unexpected-column",
+          objectName: "worker_session_placement_moves.future_required",
+        }),
+      ],
+    });
+  });
+
   it("classifies a drifted canonical named index as startup-repairable", async () => {
     const databasePath = createExplicitStateDatabase();
     const { DatabaseSync } = requireNodeSqlite();
