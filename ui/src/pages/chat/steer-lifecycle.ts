@@ -82,24 +82,39 @@ export type SteerSendDependencies = {
 
 type SteerTarget = { runId: string; leafEntryId?: string | null };
 
-function resolveSteerTarget(host: SteerLifecycleHost, item: ChatQueueItem): SteerTarget | null {
+// "none" separates the empty case (no active run) from "ambiguous" (several
+// runs, pick one); the old single null reported both as ambiguity (#45).
+type SteerTargetResolution = SteerTarget | { runId?: undefined; reason: "none" | "ambiguous" };
+
+function isSteerTarget(resolution: SteerTargetResolution): resolution is SteerTarget {
+  return typeof resolution.runId === "string";
+}
+
+function resolveSteerTarget(host: SteerLifecycleHost, item: ChatQueueItem): SteerTargetResolution {
   const matchingRows =
     host.sessionsResult?.sessions.filter((row) =>
       uiSessionRowMatchesSelectedChat(host, row.key, item.sessionKey ?? host.sessionKey),
     ) ?? [];
   const serverRunIds = new Set(
-    matchingRows.flatMap((row) => (row.hasActiveRun ? (row.activeRunIds ?? []) : [])),
+    matchingRows.flatMap((row) => [
+      ...(row.hasActiveRun ? (row.activeRunIds ?? []) : []),
+      // Subagent-only activity opens the admission gate but keeps its run ids out
+      // of activeRunIds; without these a steer at a background run is unresolvable (#45).
+      ...(row.activeSubagentRunIds ?? []),
+    ]),
   );
   const durableRunId = item.kind === "steered" ? item.steerTargetRunId?.trim() : undefined;
   if (item.kind === "steered" && !durableRunId) {
-    return null;
+    return { reason: "none" };
   }
   const runId =
     durableRunId ||
     host.chatRunId?.trim() ||
     (serverRunIds.size === 1 ? [...serverRunIds][0] : undefined);
   if (!runId) {
-    return null;
+    // Several live runs and no chatRunId to disambiguate is genuine ambiguity;
+    // an empty candidate set is simply "nothing to steer".
+    return { reason: serverRunIds.size > 1 ? "ambiguous" : "none" };
   }
   const activeRow = matchingRows.find((row) => row.activeRunIds?.includes(runId));
   const displayedLeaf =
@@ -387,15 +402,25 @@ export async function sendQueuedChatMessageWithQueueMode(
   if (!item) {
     return;
   }
-  const steerTarget = isSteer ? resolveSteerTarget(host, item) : null;
-  if (isSteer && !steerTarget) {
-    const error =
-      item.kind === "steered"
-        ? "This restored steer has no original run target and cannot be retried safely."
-        : "The active run could not be identified uniquely. Review and retry.";
-    updateQueuedMessage(host, id, (entry) => ({ ...entry, sendError: error, sendState: "failed" }));
-    setChatError(host, error);
-    return;
+  const resolution = isSteer ? resolveSteerTarget(host, item) : null;
+  let steerTarget: SteerTarget | null = null;
+  if (resolution) {
+    if (!isSteerTarget(resolution)) {
+      const error =
+        item.kind === "steered"
+          ? "This restored steer has no original run target and cannot be retried safely."
+          : resolution.reason === "ambiguous"
+            ? "Several active runs match; open the run you want to steer, then retry."
+            : "No active run to steer. Review and retry.";
+      updateQueuedMessage(host, id, (entry) => ({
+        ...entry,
+        sendError: error,
+        sendState: "failed",
+      }));
+      setChatError(host, error);
+      return;
+    }
+    steerTarget = resolution;
   }
   const activeRunId = steerTarget?.runId ?? host.chatRunId;
   const itemSessionKey = item.sessionKey ?? host.sessionKey;

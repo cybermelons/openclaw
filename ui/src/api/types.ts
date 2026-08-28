@@ -470,6 +470,8 @@ export type GatewaySessionRow = SessionRow & {
   hasAutomation?: boolean;
   subagentRunState?: SubagentRunState;
   hasActiveSubagentRun?: boolean;
+  /** Run ids of live descendant/subagent runs, so a steer can target one (#45). */
+  activeSubagentRunIds?: string[];
   startedAt?: number;
   endedAt?: number;
   runtimeMs?: number;

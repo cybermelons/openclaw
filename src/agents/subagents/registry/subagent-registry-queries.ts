@@ -94,6 +94,7 @@ export type SubagentRunReadIndex<T extends SubagentRunReadRecord = SubagentRunRe
   getDisplaySubagentRun(childSessionKey: string): T | null;
   latestRunsByChildSessionKey: ReadonlyMap<string, T>;
   countActiveDescendantRuns(rootSessionKey: string): number;
+  listActiveDescendantRunIds(rootSessionKey: string): string[];
   countPendingDescendantRuns(rootSessionKey: string): number;
   hasDescendantRunAwaitingSettle(rootSessionKey: string, excludeRunId?: string): boolean;
   listDescendantRunsForRequester(rootSessionKey: string): T[];
@@ -251,6 +252,18 @@ export function buildSubagentRunReadIndexFromRuns<T extends SubagentRunReadRecor
     return count;
   };
 
+  // Same liveness predicate as countActiveDescendantRuns, but yields the run
+  // ids so a UI steer can target a subagent-only run instead of only counting it.
+  const listActiveDescendantRunIds = (rootSessionKey: string): string[] => {
+    const runIds: string[] = [];
+    forEachDescendantRun(rootSessionKey, (entry) => {
+      if (isLiveUnendedSubagentRun(entry, now)) {
+        runIds.push(entry.runId);
+      }
+    });
+    return runIds;
+  };
+
   const countPendingDescendantRunsInternal = (
     rootSessionKey: string,
     options?: {
@@ -315,6 +328,7 @@ export function buildSubagentRunReadIndexFromRuns<T extends SubagentRunReadRecor
     getDisplaySubagentRun,
     latestRunsByChildSessionKey,
     countActiveDescendantRuns,
+    listActiveDescendantRunIds,
     countPendingDescendantRuns,
     hasDescendantRunAwaitingSettle,
     listDescendantRunsForRequester,
@@ -476,6 +490,14 @@ export function countActiveDescendantRunsFromRuns(
   rootSessionKey: string,
 ): number {
   return buildSubagentRunReadIndexFromRuns({ runs }).countActiveDescendantRuns(rootSessionKey);
+}
+
+/** Lists the run ids of live descendants under a requester/session tree. */
+export function listActiveDescendantRunIdsFromRuns(
+  runs: Map<string, SubagentRunRecord>,
+  rootSessionKey: string,
+): string[] {
+  return buildSubagentRunReadIndexFromRuns({ runs }).listActiveDescendantRunIds(rootSessionKey);
 }
 
 /** Counts descendants that are live or ended but not yet cleaned up. */

@@ -11,11 +11,11 @@ import { resolveAgentIdentity } from "../agents/identity.js";
 import type { ModelCatalogEntry } from "../agents/model-catalog.js";
 import { resolveSessionModelIdentityRef } from "../agents/session-model-ref.js";
 import {
-  countActiveDescendantRuns,
   getSessionDisplaySubagentRunByChildSessionKey,
   getSubagentSessionRuntimeMs,
   getSubagentSessionStartedAt,
   isSubagentRunLive,
+  listActiveDescendantRunIds,
   resolveSubagentSessionStatus,
 } from "../agents/subagents/registry/subagent-registry-read.js";
 import { resolveQueueSettingsCore } from "../auto-reply/reply/queue/settings.js";
@@ -229,9 +229,12 @@ export function buildGatewaySessionRow(params: {
     normalizeOptionalString(subagentRun?.controllerSessionKey) ||
     normalizeOptionalString(subagentRun?.requesterSessionKey);
   const liveSubagentRunActive = isSubagentRunLive(subagentRun);
-  const hasActiveSubagentRun =
-    liveSubagentRunActive ||
-    (rowContext?.subagentRuns.countActiveDescendantRuns(key) ?? countActiveDescendantRuns(key)) > 0;
+  // Concrete descendant run ids let a UI steer target subagent-only work; the
+  // admission gate opened on hasActiveSubagentRun but targeting had no run id to
+  // resolve because own-session activeRunIds never carries descendant runs (#45).
+  const activeDescendantRunIds =
+    rowContext?.subagentRuns.listActiveDescendantRunIds(key) ?? listActiveDescendantRunIds(key);
+  const hasActiveSubagentRun = liveSubagentRunActive || activeDescendantRunIds.length > 0;
   const persistedSessionStatus = entry?.status;
   const persistedSessionEndedAt = entry?.endedAt;
   const persistedSessionStartedAt = entry?.startedAt;
@@ -550,6 +553,7 @@ export function buildGatewaySessionRow(params: {
     hasAutomation: sessionHasAutomation(key, cfg, sessionAgentId) ? true : undefined,
     subagentRunState,
     hasActiveSubagentRun: subagentRun || hasActiveSubagentRun ? hasActiveSubagentRun : undefined,
+    activeSubagentRunIds: activeDescendantRunIds.length > 0 ? activeDescendantRunIds : undefined,
     startedAt: subagentRun ? subagentStartedAt : entry?.startedAt,
     endedAt: subagentRun ? subagentEndedAt : entry?.endedAt,
     runtimeMs: subagentRun ? subagentRuntimeMs : entry?.runtimeMs,
