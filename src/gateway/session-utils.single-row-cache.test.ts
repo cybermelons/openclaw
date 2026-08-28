@@ -33,11 +33,13 @@ const subagentRegistryReadMock = vi.hoisted(() => {
         (childSessionKey: string) => runsByChildSessionKey.get(childSessionKey) ?? null,
       ),
       countActiveDescendantRuns: vi.fn(() => 0),
+      listActiveDescendantRunIds: vi.fn(() => []),
     };
   });
   return {
     buildSubagentSessionListReadIndex,
     countActiveDescendantRuns: vi.fn(() => 0),
+    listActiveDescendantRunIds: vi.fn(() => []),
     getSessionDisplaySubagentRunByChildSessionKey: vi.fn(
       (childSessionKey: string) => runsByChildSessionKey.get(childSessionKey) ?? null,
     ),
