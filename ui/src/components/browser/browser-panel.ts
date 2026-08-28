@@ -172,7 +172,7 @@ class OpenClawBrowserPanel extends OpenClawLitElement implements BrowserPanelCon
       return;
     }
     if (this.dockLayout.open) {
-      this.closePanel();
+      this.closeBrowserPanel();
     } else {
       this.dockLayout.setOpen(true);
       void this.browserPanelController.refreshAll();
@@ -204,7 +204,7 @@ class OpenClawBrowserPanel extends OpenClawLitElement implements BrowserPanelCon
       this.dockLayout.setDock(detail.dock, false);
     }
     if (detail?.open === false) {
-      this.closePanel();
+      this.closeBrowserPanel();
       return;
     }
     const normalizedRequestedUrl =
@@ -227,7 +227,7 @@ class OpenClawBrowserPanel extends OpenClawLitElement implements BrowserPanelCon
     this.toggle();
   }
 
-  private closePanel(): void {
+  closeBrowserPanel(): void {
     this.dockLayout.setOpen(false);
   }
 
@@ -245,7 +245,7 @@ class OpenClawBrowserPanel extends OpenClawLitElement implements BrowserPanelCon
       this.dockLayout.height,
       this.dockLayout.width,
       (dock) => this.setDock(dock),
-      () => this.closePanel(),
+      () => this.closeBrowserPanel(),
       this.dockLayout.renderResizer("bp", t("browser.resize")),
       this.embedded,
     );

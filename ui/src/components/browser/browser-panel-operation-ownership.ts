@@ -15,7 +15,9 @@ export interface BrowserPanelControllerHost extends ReactiveControllerHost {
   readonly isConnected: boolean;
   readonly renderRoot: HTMLElement | DocumentFragment;
   readonly updateComplete: Promise<boolean>;
+  readonly embedded: boolean;
   browserPanelIsOpen(): boolean;
+  closeBrowserPanel(): void;
 }
 
 type BrowserPanelInvocation = {
