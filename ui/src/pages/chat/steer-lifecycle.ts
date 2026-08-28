@@ -11,7 +11,6 @@ import {
   areUiSessionKeysEquivalent,
   isUiGlobalSessionKey,
   normalizeAgentId,
-  uiSessionRowMatchesSelectedChat,
 } from "../../lib/sessions/session-key.ts";
 import { showToast } from "../../lib/toast.ts";
 import { generateUUID } from "../../lib/uuid.ts";
@@ -42,7 +41,7 @@ import {
   isQueuedMessageBeingEdited,
   QUEUED_MESSAGE_STEER_CONFLICT_ERROR,
 } from "./queued-message-edit.ts";
-import { hasAbortableSessionRun } from "./run-lifecycle.ts";
+import { hasAbortableSessionRun, resolveAuthoritativeSessionRunIds } from "./run-lifecycle.ts";
 import { scheduleChatScroll, type ChatScrollHost } from "./scroll.ts";
 import { appendChatMessageToCache, readChatMessagesFromCache } from "./session-message-cache.ts";
 import {
@@ -92,17 +91,10 @@ function isSteerTarget(resolution: SteerTargetResolution): resolution is SteerTa
 }
 
 function resolveSteerTarget(host: SteerLifecycleHost, item: ChatQueueItem): SteerTargetResolution {
-  const matchingRows =
-    host.sessionsResult?.sessions.filter((row) =>
-      uiSessionRowMatchesSelectedChat(host, row.key, item.sessionKey ?? host.sessionKey),
-    ) ?? [];
-  const serverRunIds = new Set(
-    matchingRows.flatMap((row) => [
-      ...(row.hasActiveRun ? (row.activeRunIds ?? []) : []),
-      // Subagent-only activity opens the admission gate but keeps its run ids out
-      // of activeRunIds; without these a steer at a background run is unresolvable (#45).
-      ...(row.activeSubagentRunIds ?? []),
-    ]),
+  const { rows: matchingRows, runIds: serverRunIds } = resolveAuthoritativeSessionRunIds(
+    host,
+    item.sessionKey ?? host.sessionKey,
+    host.sessionsResult,
   );
   const durableRunId = item.kind === "steered" ? item.steerTargetRunId?.trim() : undefined;
   if (item.kind === "steered" && !durableRunId) {
