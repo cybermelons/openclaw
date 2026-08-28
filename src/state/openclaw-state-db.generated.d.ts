@@ -1614,6 +1614,7 @@ export interface WorkerSessionPlacements {
   environment_id: string | null;
   execution_mode: string | null;
   last_live_event_ack_cursor: number | null;
+  last_progress_at_ms: number | null;
   last_transcript_ack_cursor: number | null;
   recovery_error: string | null;
   remote_workspace_dir: string | null;

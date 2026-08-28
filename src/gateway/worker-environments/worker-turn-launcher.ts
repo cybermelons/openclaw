@@ -72,6 +72,11 @@ type WorkerTurnLauncherOptions = {
   redispatchReclaimed: (placement: ReclaimedWorkerPlacement) => Promise<ActiveWorkerPlacement>;
 };
 
+// A live local run must leave a positive liveness trace: without it a claim held by
+// a dead in-process run is byte-identical to one held by a running turn, so nothing
+// downstream can tell "running" from "orphaned after the owner died" (#58).
+const LOCAL_TURN_HEARTBEAT_INTERVAL_MS = 15_000;
+
 async function executeLocalTurn<T>(params: {
   claim: LocalTurnPlacementClaim;
   placements: WorkerSessionPlacementStore;
@@ -84,9 +89,16 @@ async function executeLocalTurn<T>(params: {
     runId: params.claim.runId,
     owner: { kind: "local" },
   });
+  const heartbeat = setInterval(() => {
+    // Best-effort: a released or superseded claim simply matches no row.
+    params.placements.heartbeatTurn(turnClaim);
+  }, LOCAL_TURN_HEARTBEAT_INTERVAL_MS);
+  // Never keep the event loop alive for the heartbeat alone.
+  heartbeat.unref();
   try {
     return await params.runLocal();
   } finally {
+    clearInterval(heartbeat);
     await releaseClaimIfOwned(params.placements, turnClaim);
   }
 }

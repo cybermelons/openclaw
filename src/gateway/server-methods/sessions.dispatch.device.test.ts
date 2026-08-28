@@ -104,6 +104,7 @@ describe("sessions.dispatch device targets", () => {
       createdAtMs: 1,
       updatedAtMs: 2,
       stateChangedAtMs: 2,
+      lastProgressAtMs: null,
     } satisfies WorkerSessionPlacementRecord);
     const respond = await invokeSessionDispatch(
       makeDispatchTestContext({

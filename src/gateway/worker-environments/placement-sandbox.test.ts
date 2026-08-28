@@ -18,6 +18,7 @@ describe("remote-exec placement sandbox", () => {
       createdAtMs: 1,
       updatedAtMs: 2,
       stateChangedAtMs: 2,
+      lastProgressAtMs: null,
       environmentId,
       activeOwnerEpoch: 7,
       workspaceBaseManifestRef: `sha256:${"b".repeat(64)}`,

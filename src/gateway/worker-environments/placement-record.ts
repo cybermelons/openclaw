@@ -98,6 +98,8 @@ type PlacementRecordBase<TurnClaim extends PersistedTurnClaim | null> =
     createdAtMs: number;
     updatedAtMs: number;
     stateChangedAtMs: number;
+    /** Advances while a live turn heartbeats its claim; distinguishes running from orphaned (#58). */
+    lastProgressAtMs: number | null;
     /** Process-local UI projection; deliberately absent from SQLite. */
     workspaceResultConflict?: WorkerWorkspaceResultConflict;
   };

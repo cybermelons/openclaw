@@ -42,6 +42,7 @@ function placementRecord(
     createdAtMs: 1,
     updatedAtMs: 2,
     stateChangedAtMs: 2,
+    lastProgressAtMs: null,
   };
   if (state === "active") {
     return {
@@ -100,6 +101,7 @@ function terminalPlacementRecord(
     createdAtMs: 1,
     updatedAtMs: 2,
     stateChangedAtMs: 2,
+    lastProgressAtMs: null,
   };
   if (state === "failed") {
     return {

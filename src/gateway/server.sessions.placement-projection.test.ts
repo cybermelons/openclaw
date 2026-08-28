@@ -33,6 +33,7 @@ function activePlacementRecord(): Extract<WorkerSessionPlacementRecord, { state:
     createdAtMs: 100,
     updatedAtMs: 300,
     stateChangedAtMs: 200,
+    lastProgressAtMs: null,
   };
 }
 

@@ -119,6 +119,7 @@ export function createPlacementTurnClaimOps(runtime: PlacementStoreRuntime) {
           turn_claim_run_id: runId,
           turn_claim_generation: current.generation,
           turn_claim_owner_epoch: owner.kind === "worker" ? owner.ownerEpoch : null,
+          last_progress_at_ms: updatedAtMs,
           updated_at_ms: updatedAtMs,
         })
         .where("session_id", "=", current.sessionId)
@@ -183,6 +184,7 @@ export function createPlacementTurnClaimOps(runtime: PlacementStoreRuntime) {
               turn_claim_run_id: null,
               turn_claim_generation: null,
               turn_claim_owner_epoch: null,
+              last_progress_at_ms: null,
               updated_at_ms: now(),
             })
             .where("session_id", "=", sessionId)
@@ -225,6 +227,7 @@ export function createPlacementTurnClaimOps(runtime: PlacementStoreRuntime) {
           turn_claim_run_id: null,
           turn_claim_generation: null,
           turn_claim_owner_epoch: null,
+          last_progress_at_ms: null,
           updated_at_ms: now(),
         };
         clearWorkerWorkspacePendingResult(db, sessionId);
@@ -296,6 +299,7 @@ export function createPlacementTurnClaimOps(runtime: PlacementStoreRuntime) {
               turn_claim_run_id: null,
               turn_claim_generation: null,
               turn_claim_owner_epoch: null,
+              last_progress_at_ms: null,
               updated_at_ms: now(),
             })
             .where("session_id", "=", sessionId)
@@ -332,6 +336,7 @@ export function createPlacementTurnClaimOps(runtime: PlacementStoreRuntime) {
               turn_claim_run_id: null,
               turn_claim_generation: null,
               turn_claim_owner_epoch: null,
+              last_progress_at_ms: null,
               updated_at_ms: now(),
             })
             .where("turn_claim_owner", "=", "local"),
@@ -345,6 +350,26 @@ export function createPlacementTurnClaimOps(runtime: PlacementStoreRuntime) {
         signalTurnClaimRelease(path, sessionId);
       }
       return clearedSessionIds.length;
+    },
+
+    // Advances the claim's progress timestamp so a live turn is distinguishable from
+    // one orphaned by a dead owner. Best-effort: a released or superseded claim
+    // matches no row and the update is a no-op.
+    heartbeatTurn(claim: WorkerSessionTurnClaim): void {
+      const sessionId = required(claim.sessionId, "session id");
+      const claimId = required(claim.claimId, "turn claim id");
+      const runId = required(claim.runId, "turn claim run id");
+      write((db) => {
+        executeSqliteQuerySync(
+          db,
+          query(db)
+            .updateTable("worker_session_placements")
+            .set({ last_progress_at_ms: now() })
+            .where("session_id", "=", sessionId)
+            .where("turn_claim_id", "=", claimId)
+            .where("turn_claim_run_id", "=", runId),
+        );
+      });
     },
 
     async waitForTurnClaimRelease(
