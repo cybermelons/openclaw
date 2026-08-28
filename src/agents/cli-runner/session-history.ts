@@ -8,6 +8,7 @@ import { timestampMsToIsoString } from "@openclaw/normalization-core/number-coer
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { sliceUtf16Safe, truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import {
+  isSqliteTranscriptTarget,
   resolveSessionFilePathCore,
   resolveSessionFilePathOptions,
 } from "../../config/sessions/paths.js";
@@ -605,6 +606,12 @@ async function loadCliSessionEntries(params: {
         selectSessionTranscriptLeafControlledPath(sqliteEntries) ?? sqliteEntries,
       );
     }
+    // The sqlite store had nothing for this session. A `sqlite:` sessionFile
+    // sentinel is not a real path, so lstat-ing it would throw ENOENT and get
+    // swallowed by the catch below; take the empty branch directly instead.
+    if (isSqliteTranscriptTarget(sessionFile)) {
+      return [];
+    }
     const entryStat = await fsp.lstat(sessionFile);
     if (!entryStat.isFile() || entryStat.isSymbolicLink()) {
       return [];
@@ -705,6 +712,11 @@ export async function hasCliSessionTranscript(params: {
     const sqliteEntries = readSqliteCliSessionEntries(params);
     if (sqliteEntries) {
       return sqliteEntries.length > 0;
+    }
+    // Same sentinel guard as the loader above: no sqlite rows and a `sqlite:`
+    // sessionFile means there is no filesystem transcript to probe either.
+    if (isSqliteTranscriptTarget(sessionFile)) {
+      return false;
     }
     const entryStat = await fsp.lstat(sessionFile);
     if (!entryStat.isFile() || entryStat.isSymbolicLink()) {

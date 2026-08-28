@@ -326,6 +326,49 @@ describe("Phase-4 CS-5 sqlite reader thin-wrapper (T-P4-CS5)", () => {
     }
   });
 
+  it("does not lstat a `sqlite:` sessionFile sentinel when the sqlite store has no rows (#27)", async () => {
+    vi.resetModules();
+    vi.doMock("../../config/sessions/session-accessor.sqlite-active-events.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../config/sessions/session-accessor.sqlite-active-events.js")
+      >("../../config/sessions/session-accessor.sqlite-active-events.js");
+      return {
+        ...actual,
+        readSessionTranscriptMessageEvents: () => [],
+      };
+    });
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-cs5-sentinel-"));
+    const sessionFile = "sqlite:session-cs5-sentinel";
+    try {
+      const fspModule = await import("node:fs/promises");
+      const lstatSpy = vi.spyOn(fspModule.default, "lstat");
+      const { hasCliSessionTranscript: hasTranscript, loadCliSessionHistoryMessages: loadHistory } =
+        await import("./session-history.js");
+      await withCliSessionState(stateDir, async () => {
+        const history = await loadHistory({
+          sessionId: "session-cs5-sentinel",
+          sessionFile,
+          sessionKey: "agent:main:session-cs5-sentinel",
+          agentId: "main",
+        });
+        expect(history).toEqual([]);
+        await expect(
+          hasTranscript({
+            sessionId: "session-cs5-sentinel",
+            sessionFile,
+            sessionKey: "agent:main:session-cs5-sentinel",
+            agentId: "main",
+          }),
+        ).resolves.toBe(false);
+      });
+      expect(lstatSpy).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+      vi.doUnmock("../../config/sessions/session-accessor.sqlite-active-events.js");
+      vi.resetModules();
+    }
+  });
+
   it("returns undefined from the sqlite path (file reader serves the read) on a generic store error", async () => {
     vi.resetModules();
     vi.doMock("../../config/sessions/session-accessor.sqlite-active-events.js", async () => {
