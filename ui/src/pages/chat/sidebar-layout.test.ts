@@ -151,6 +151,16 @@ describe("sidebar layout", () => {
     });
   });
 
+  it("forces the panel closed when a persisted open layout has no panels", () => {
+    expect(
+      normalizeSidebarLayout({
+        columns: [{ id: "empty", side: "right", panels: [] }],
+        open: true,
+        expanded: false,
+      }),
+    ).toEqual({ columns: [], dock: "right", open: false, expanded: false });
+  });
+
   it("deduplicates slots and repairs untrusted persisted values", () => {
     expect(normalizeSidebarLayout(null)).toEqual({ columns: [], open: false, expanded: false });
     expect(
