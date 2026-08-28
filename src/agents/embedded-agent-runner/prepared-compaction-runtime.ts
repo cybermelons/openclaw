@@ -51,6 +51,7 @@ import {
   applyLocalNoAuthHeaderOverride,
   resolveModelAuthMode,
 } from "../model-auth.js";
+import { resolveDefaultModelForAgent } from "../model-selection.js";
 import { supportsModelTools } from "../model-tool-support.js";
 import { resolveAgentPromptSurfaceForSessionKey } from "../prompt-surface.js";
 import { collectRuntimeChannelCapabilities } from "../runtime-capabilities.js";
@@ -451,6 +452,10 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       config: params.config,
       agentId: params.agentId,
     });
+    const defaultModelRef = resolveDefaultModelForAgent({
+      cfg: params.config ?? {},
+      agentId: sessionAgentId,
+    });
     // Resolve channel-specific message actions for system prompt
     const channelActions = runtimeChannel
       ? listChannelSupportedActions(
@@ -497,6 +502,7 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       arch: os.arch(),
       node: process.version,
       model: `${provider}/${modelId}`,
+      defaultModel: `${defaultModelRef.provider}/${defaultModelRef.model}`,
       shell: detectRuntimeShell(),
       channel: runtimeChannel,
       chatType: params.chatType,
