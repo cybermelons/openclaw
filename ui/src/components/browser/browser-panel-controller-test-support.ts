@@ -59,6 +59,10 @@ export class TestBrowserPanelHost implements BrowserPanelControllerHost {
   available = true;
   isConnected = true;
   open = true;
+  embedded = false;
+  readonly closeBrowserPanel = vi.fn(() => {
+    this.open = false;
+  });
 
   constructor(public client: GatewayBrowserClient | null) {
     const stage = document.createElement("div");

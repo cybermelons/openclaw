@@ -196,6 +196,10 @@ describe("BrowserPanelController superseded tab snapshots", () => {
       throw new Error(`Unexpected browser route: ${envelope.method} ${envelope.path}`);
     });
     const controller = createBrowserPanelTestController(client, "active-tab", activeUrl);
+    controller.tabs = [
+      { id: "active-tab", targetId: "raw-active", title: "Active", url: activeUrl },
+      { id: "background-tab", targetId: "raw-background", title: "Background", url: activeUrl },
+    ];
     const previousView = controller.view;
 
     const previousRefresh = controller.refreshAll();

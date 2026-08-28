@@ -544,6 +544,13 @@ export class BrowserPanelController implements ReactiveController {
         this.setState("loading", false);
       }
     }, false);
+    // The chat side panel hosts the embedded surface and owns its visibility;
+    // an embedded document has no dock toggle to reopen a closed panel, so it
+    // keeps the panel with an empty tab strip instead of leaving nothing to
+    // reopen it with.
+    if (this.tabs.length === 0 && !this.host.embedded) {
+      this.host.closeBrowserPanel();
+    }
     await this.host.updateComplete;
   }
 

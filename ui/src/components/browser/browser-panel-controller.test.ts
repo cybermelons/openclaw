@@ -703,6 +703,75 @@ describe("BrowserPanelController tab and lifecycle ownership", () => {
     expect(controller.loading).toBe(false);
   });
 
+  it("closes the dock panel when the last tab closes", async () => {
+    const { client } = createBrowserClient(async (envelope) => {
+      if (envelope.method === "DELETE" && envelope.path === "/tabs/tab-a") {
+        return { ok: true };
+      }
+      if (envelope.method === "GET" && envelope.path === "/tabs") {
+        return { running: true, tabs: [] };
+      }
+      throw new Error(`Unexpected browser route: ${envelope.method} ${envelope.path}`);
+    });
+    const host = new TestBrowserPanelHost(client);
+    const controller = new BrowserPanelController(host);
+    controller.activeTargetId = "tab-a";
+    controller.view = createView("tab-a");
+
+    await controller.closeTab("tab-a");
+
+    expect(controller.tabs).toHaveLength(0);
+    expect(host.closeBrowserPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not close the dock panel when other tabs remain", async () => {
+    const remaining = createBrowserPanelTestTab("tab-b", "https://example.test/b", "B");
+    const { client } = createBrowserClient(async (envelope) => {
+      if (envelope.method === "DELETE" && envelope.path === "/tabs/tab-a") {
+        return { ok: true };
+      }
+      if (envelope.method === "GET" && envelope.path === "/tabs") {
+        return { running: true, tabs: [remaining] };
+      }
+      if (envelope.path === "/screenshot") {
+        return { path: "/fresh.png", targetId: "raw-b", url: "https://example.test/b" };
+      }
+      throw new Error(`Unexpected browser route: ${envelope.method} ${envelope.path}`);
+    });
+    stubScreenshotMedia();
+    const host = new TestBrowserPanelHost(client);
+    const controller = new BrowserPanelController(host);
+    controller.activeTargetId = "tab-a";
+    controller.view = createView("tab-a");
+
+    await controller.closeTab("tab-a");
+
+    expect(controller.tabs.map((tab) => tab.id)).toEqual(["tab-b"]);
+    expect(host.closeBrowserPanel).not.toHaveBeenCalled();
+  });
+
+  it("does not close the dock panel for an embedded surface with no tabs left", async () => {
+    const { client } = createBrowserClient(async (envelope) => {
+      if (envelope.method === "DELETE" && envelope.path === "/tabs/tab-a") {
+        return { ok: true };
+      }
+      if (envelope.method === "GET" && envelope.path === "/tabs") {
+        return { running: true, tabs: [] };
+      }
+      throw new Error(`Unexpected browser route: ${envelope.method} ${envelope.path}`);
+    });
+    const host = new TestBrowserPanelHost(client);
+    host.embedded = true;
+    const controller = new BrowserPanelController(host);
+    controller.activeTargetId = "tab-a";
+    controller.view = createView("tab-a");
+
+    await controller.closeTab("tab-a");
+
+    expect(controller.tabs).toHaveLength(0);
+    expect(host.closeBrowserPanel).not.toHaveBeenCalled();
+  });
+
   it("invalidates old-document inspection and wheel input before same-tab navigation", async () => {
     vi.useFakeTimers({ now: 1_000 });
     const previousInspection = createDeferred<unknown>();
