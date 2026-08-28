@@ -9,13 +9,17 @@ import {
   resolveControlUiRootSync,
 } from "../infra/control-ui-assets.js";
 import type { RuntimeEnv } from "../runtime.js";
+import {
+  formatControlUiBuildSkewMessage,
+  resolveControlUiBuildSkew,
+} from "./control-ui-build-skew.js";
 import type { ControlUiRootState } from "./control-ui.js";
 
 type GatewayControlUiRootParams = {
   controlUiRootOverride?: string;
   controlUiEnabled: boolean;
   gatewayRuntime: RuntimeEnv;
-  log: { warn: (message: string) => void };
+  log: { warn: (message: string) => void; error: (message: string) => void };
 };
 
 export type GatewayControlUiRootLifecycle = {
@@ -23,6 +27,26 @@ export type GatewayControlUiRootLifecycle = {
   start: (isStopped: () => boolean, signal: AbortSignal) => Promise<void>;
   stop: () => Promise<void>;
 };
+
+/**
+ * Name a split dist/ at startup. A UI-only rebuild leaves the served Control UI
+ * on a different build id than the gateway, and admission then rejects every
+ * client with a reload message that cannot help (#6).
+ */
+function warnOnControlUiBuildSkew(params: {
+  root: string;
+  configured: boolean;
+  log: GatewayControlUiRootParams["log"];
+}): void {
+  if (params.configured) {
+    return;
+  }
+  const skew = resolveControlUiBuildSkew({ controlUiRoot: params.root });
+  if (!skew) {
+    return;
+  }
+  params.log.error(`gateway: ${formatControlUiBuildSkewMessage(skew)}`);
+}
 
 function resolveAutoRoot(): string | null {
   return resolveControlUiRootSync({
@@ -54,7 +78,13 @@ function prepareResolvedRootState(params: {
   log: GatewayControlUiRootParams["log"];
 }): ControlUiRootState {
   try {
-    return createResolvedRootState(params.root, params.configured);
+    const resolved = createResolvedRootState(params.root, params.configured);
+    warnOnControlUiBuildSkew({
+      root: params.root,
+      configured: params.configured === true,
+      log: params.log,
+    });
+    return resolved;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     const message = `Control UI assets are unavailable at ${params.root}: ${detail}`;
