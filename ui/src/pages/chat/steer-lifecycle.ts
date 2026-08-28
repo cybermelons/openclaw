@@ -37,6 +37,7 @@ import {
 } from "./chat-send-ack.ts";
 import type { ChatState } from "./chat-state-contract.ts";
 import { readChatSessionProjectionScope, reduceChatSessionProjection } from "./history-merge.ts";
+import { controlUiNowMs } from "./performance.ts";
 import {
   isQueuedMessageBeingEdited,
   QUEUED_MESSAGE_STEER_CONFLICT_ERROR,
@@ -221,7 +222,11 @@ export function preserveQueuedUserTurn(state: SteerLifecycleHost, item: ChatQueu
   const userMessage = {
     role: "user",
     content,
-    timestamp: item.createdAt,
+    // A queued/steered turn is delivered when it materializes here, not when it
+    // was enqueued; the server persists this same delivery time, so stamping it
+    // now keeps the optimistic render consistent through reconcile instead of
+    // briefly showing the (often much earlier) enqueue time.
+    timestamp: controlUiNowMs(),
     __openclaw: { idempotencyKey: `${runId}:user` },
   };
   if (visibleSessionMatches(state, sessionKey, item.agentId)) {
