@@ -8491,6 +8491,47 @@ describe("handleSendChat", () => {
     expect(JSON.stringify(host.chatMessages[0])).toContain("keep this visible");
   });
 
+  it("stamps a materialized steered user turn with the delivery time, not the enqueue time", () => {
+    const deliveryNow = 999_000;
+    const nowSpy = vi.spyOn(performance, "now").mockReturnValue(deliveryNow);
+    try {
+      const host = makeChatHost({
+        chatRunId: "active-run",
+        chatQueue: [
+          {
+            id: "delivery-steer",
+            text: "delivered late",
+            // Enqueued long before delivery; the render must not show this time.
+            createdAt: 1,
+            kind: "steered",
+            pendingRunId: "active-run",
+            sendRunId: "delivery-steer-run",
+            sessionKey: "agent:main:main",
+          },
+        ],
+        sessionKey: "agent:main:main",
+      });
+
+      handlePageGatewayEvent(asChatPageHost(host), {
+        event: "chat",
+        payload: {
+          state: "final",
+          runId: "active-run",
+          sessionKey: "agent:main:main",
+          message: { role: "assistant", content: [{ type: "text", text: "done" }], timestamp: 2 },
+        },
+      } as Parameters<typeof handlePageGatewayEvent>[1]);
+
+      expect(host.chatMessages[0]).toMatchObject({
+        role: "user",
+        __openclaw: { idempotencyKey: "delivery-steer-run:user" },
+      });
+      expect((host.chatMessages[0] as { timestamp?: number }).timestamp).toBe(deliveryNow);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it("still materializes the user turn when an assistant entry carries the steer's run key", () => {
     const assistantWithRunKey = {
       role: "assistant",
