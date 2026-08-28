@@ -144,11 +144,12 @@ describe("resolveSidebarSessionSubtitle", () => {
     ).toBe("Finished with warnings");
   });
 
-  it("falls back to the last reply after the idle final digest is read", () => {
+  it("does not fall back to the last reply after the idle final digest is read", () => {
     expect(
       resolveSidebarSessionSubtitle({
         session: {
           ...workSession(),
+          subtitle: undefined,
           lastMessagePreview: "The final reply is durable.",
           observerDigest: {
             headline: "Finished with warnings",
@@ -164,7 +165,7 @@ describe("resolveSidebarSessionSubtitle", () => {
         narrationLine: undefined,
         observerDigest: null,
       }).subtitle,
-    ).toBe("The final reply is durable.");
+    ).toBeUndefined();
   });
 
   it("keeps attention and agent status ahead of the idle digest and last reply", () => {
