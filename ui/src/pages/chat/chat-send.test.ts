@@ -57,6 +57,7 @@ import {
   readChatMessagesFromCache,
   type ChatMessageCache,
 } from "./session-message-cache.ts";
+import { buildInflightSteerChip } from "./steered-chip.ts";
 
 type ExecuteSlashCommand = typeof executeSlashCommand;
 type TestChatHost = ReturnType<typeof makeChatHost>;
@@ -5538,6 +5539,39 @@ describe("handleSendChat", () => {
     } finally {
       stopCachedPane();
       stopSource();
+    }
+  });
+
+  it("retracts the durable row when a cancelled in-flight steer diverges from it", () => {
+    // The steer claim parks the durable row at "unconfirmed" while the pane shows
+    // an in-flight "steering" chip. Cancelling must delete the durable row so the
+    // abort-path replay cannot resurrect it (#54); the version gate has to match
+    // against the durable row, not the divergent chip.
+    const sessionKey = "agent:main";
+    const durable = {
+      id: "steer-cancelled-while-inflight",
+      text: "change course before the ack",
+      createdAt: 1,
+      kind: "steered" as const,
+      sendRunId: "steer-run",
+      sendState: "unconfirmed" as const,
+      sessionKey,
+    };
+    const steeringChip = buildInflightSteerChip(durable, durable.sendRunId, "active-run");
+    const host = makeChatHost({ chatQueue: [steeringChip], sessionKey });
+    const stopHost = subscribeChatOutboxProjection(host);
+    try {
+      expect(admitStoredChatComposerQueueItem(host, sessionKey, durable)).toBe(true);
+      expect(steeringChip.sendState).toBe("steering");
+
+      expect(
+        removeVisibleOrScopedQueuedMessageWithoutReleasing(host, durable.id, sessionKey),
+      ).not.toBeNull();
+
+      const remaining = listStoredChatOutboxes(host).flatMap((outbox) => outbox.queue);
+      expect(remaining).toStrictEqual([]);
+    } finally {
+      stopHost();
     }
   });
 
