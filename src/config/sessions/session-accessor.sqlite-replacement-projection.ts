@@ -9,7 +9,6 @@ import type {
   SessionEntryReplacementUpdate,
   SessionEntryStatus,
 } from "./session-accessor.sqlite-contract.js";
-import { sqliteSessionEntriesEqual } from "./session-accessor.sqlite-entry-equality.js";
 import {
   deleteLegacySessionEntryRows,
   readExactSessionEntryRow,
@@ -31,7 +30,6 @@ import {
 } from "./session-accessor.sqlite-scope.js";
 import { readSessionEntriesByStatus } from "./session-accessor.sqlite-status.js";
 import type { SessionEntryReplacement } from "./session-accessor.types.js";
-import { sessionCasValueCompareEnabled } from "./session-cas-mode.js";
 import { SessionConflictError } from "./session-conflict-error.js";
 import type { SessionEntry } from "./types.js";
 
@@ -91,7 +89,6 @@ async function applySqliteSessionEntryReplacementProjection<T, TReplacement>(
     const expectedEntryJson = new Map(
       entries.map(({ sessionKey, entry }) => [sessionKey, JSON.stringify(entry)]),
     );
-    const expectedEntry = new Map(entries.map(({ sessionKey, entry }) => [sessionKey, entry]));
     // `entries` is sourced from readSessionEntriesByStatus/readExactSessionEntryRow/
     // readSessionEntryStore, none of which uniformly carry `revision` on their
     // shared, widely-consumed return type (SessionEntrySummary). Capture the
@@ -171,11 +168,8 @@ async function applySqliteSessionEntryReplacementProjection<T, TReplacement>(
           const transactionEntry = currentRow?.entry;
           const actualRevision = currentRow?.row.revision ?? -1;
           const expected = expectedRevision.get(sessionKey) ?? -1;
-          // Default (flag off): integer revision compare. Flag on: legacy
-          // value-compare via sqliteSessionEntriesEqual (PHASE-1.md §7).
-          const replacementConflicted = sessionCasValueCompareEnabled()
-            ? !sqliteSessionEntriesEqual(transactionEntry, expectedEntry.get(sessionKey))
-            : actualRevision !== expected;
+          // Integer revision compare.
+          const replacementConflicted = actualRevision !== expected;
           if (replacementConflicted) {
             throw new SessionConflictError({
               actualRevision,
