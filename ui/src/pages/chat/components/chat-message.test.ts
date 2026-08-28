@@ -937,7 +937,13 @@ describe("grouped chat rendering", () => {
       HTMLAnchorElement,
     );
     expect(disclosure.classList.contains("is-expanded")).toBe(false);
-    expect(collapsedText.textContent?.trim()).toBe(`${collapsedLines.join("\n")}…`);
+    // The file-link renderer appends a sibling "bam" button (⧉) after the
+    // AGENTS.md:188 reference, so the collapsed container's textContent carries
+    // that glyph in the first line.
+    const renderedCollapsedLines = collapsedLines.map((line) =>
+      line.replace("AGENTS.md:188", "AGENTS.md:188⧉"),
+    );
+    expect(collapsedText.textContent?.trim()).toBe(`${renderedCollapsedLines.join("\n")}…`);
     expect(collapsedText.textContent).not.toContain(expandedTail);
     expect(collapsedFileLink.dataset.filePath).toBe("AGENTS.md");
     expect(collapsedFileLink.dataset.fileLine).toBe("188");
