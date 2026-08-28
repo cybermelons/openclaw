@@ -48,7 +48,6 @@ import {
   canonicalSessionKeyMigrationRequiredError,
   isCanonicalSessionKeyMigrationRequiredError,
 } from "./session-canonical-key.js";
-import { sessionCasValueCompareEnabled } from "./session-cas-mode.js";
 import { SessionConflictError } from "./session-conflict-error.js";
 import {
   hasValidSessionEntryIdentity,
@@ -164,24 +163,14 @@ export function readSessionEntrySelectionSnapshot(
 }
 
 /**
- * Conflict predicate for `assertSessionEntrySelectionUnchanged`. Default
- * (flag off): integer revision compare — a key change, an existence flip
- * (one side selected, the other not), or a differing `row.revision` is a
- * conflict. Flag on (`OPENCLAW_SESSION_CAS_VALUE_COMPARE=1`): legacy
- * value-compare via `sqliteSessionEntriesEqual`, kept byte-identical to
- * pre-Phase-1 behavior (can miss an ABA ping-pong that leaves the same
- * value at a different revision — PHASE-1.md §7, shape-only parity).
+ * Conflict predicate for `assertSessionEntrySelectionUnchanged`. Integer
+ * revision compare — a key change, an existence flip (one side selected,
+ * the other not), or a differing `row.revision` is a conflict.
  */
 function sessionEntrySelectionPrimaryConflicted(
   expected: SqliteSessionEntrySelectionSnapshot,
   current: SqliteSessionEntrySelectionSnapshot,
 ): boolean {
-  if (sessionCasValueCompareEnabled()) {
-    return !(
-      expected.selected?.row.session_key === current.selected?.row.session_key &&
-      sqliteSessionEntriesEqual(expected.selected?.entry, current.selected?.entry)
-    );
-  }
   const expectedKey = expected.selected?.row.session_key;
   const currentKey = current.selected?.row.session_key;
   const expectedRevision = expected.selected?.row.revision;
@@ -360,22 +349,14 @@ export function readLifecycleTargetSnapshot(
 }
 
 /**
- * Conflict predicate for `assertLifecycleTargetSnapshotUnchanged`. Default
- * (flag off): integer revision compare on the primary row plus the same
- * alias-row structural guard `sqliteLifecycleTargetSnapshotsEqual` already
- * performs on `.rows`. Flag on: legacy value-compare via
- * `sqliteLifecycleTargetSnapshotsEqual`, byte-identical to pre-Phase-1.
+ * Conflict predicate for `assertLifecycleTargetSnapshotUnchanged`. Integer
+ * revision compare on the primary row plus the same alias-row structural
+ * guard `sqliteLifecycleTargetSnapshotsEqual` already performs on `.rows`.
  */
 function lifecycleTargetPrimaryConflicted(
   expected: SqliteLifecycleTargetSnapshot,
   current: SqliteLifecycleTargetSnapshot,
 ): boolean {
-  if (sessionCasValueCompareEnabled()) {
-    return !(
-      expected.primary?.key === current.primary?.key &&
-      sqliteSessionEntriesEqual(expected.primary?.entry, current.primary?.entry)
-    );
-  }
   if (expected.primary === undefined && current.primary === undefined) {
     return false;
   }

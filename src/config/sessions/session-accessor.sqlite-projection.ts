@@ -74,7 +74,6 @@ import {
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
 import { appendTranscriptEventsInTransaction } from "./session-accessor.sqlite-transcript-store.js";
-import { sessionCasValueCompareEnabled } from "./session-cas-mode.js";
 import { SessionConflictError } from "./session-conflict-error.js";
 import { resolveMaintenanceConfig } from "./store-maintenance-runtime.js";
 import type { ResolvedSessionMaintenanceConfig } from "./store-maintenance.js";
@@ -168,9 +167,7 @@ export async function applySessionStoreProjection<T>(params: {
           const currentRow = readExactSessionEntryRow(transactionDb, sessionKey);
           const expectedRevision = beforeRevisions.get(sessionKey) ?? -1;
           const actualRevision = currentRow?.row.revision ?? -1;
-          const conflicted = sessionCasValueCompareEnabled()
-            ? !sqliteSessionEntriesEqual(currentRow?.entry, before[sessionKey])
-            : actualRevision !== expectedRevision;
+          const conflicted = actualRevision !== expectedRevision;
           if (conflicted) {
             throw new SessionConflictError({ actualRevision, expectedRevision, key: sessionKey });
           }
@@ -341,14 +338,8 @@ export async function applySessionEntryLifecycleMutation(params: {
           removal,
           params.allowCanonicalRepair,
         );
-        // Default (flag off): integer revision compare. Flag on
-        // (sessionCasValueCompareEnabled): legacy value-compare via
-        // sqliteSessionEntriesEqual, byte-identical to pre-Phase-1 (can miss
-        // an ABA ping-pong that leaves the same value at a different
-        // revision — PHASE-1.md §7, shape-only parity).
-        const removalConflicted = sessionCasValueCompareEnabled()
-          ? !sqliteSessionEntriesEqual(entry, removal.expectedEntry)
-          : actualRevision !== removal.expectedRevision;
+        // Integer revision compare.
+        const removalConflicted = actualRevision !== removal.expectedRevision;
         if (removalConflicted) {
           const replacedInSameMutation = projected.upsertedEntries.some(
             (upsert) => upsert.sessionKey === removal.sessionKey,
@@ -417,11 +408,8 @@ export async function applySessionEntryLifecycleMutation(params: {
               params.allowCanonicalRepair,
             )
           : (currentRow?.row.revision ?? -1);
-        // Default (flag off): integer revision compare. Flag on: legacy
-        // value-compare via sqliteSessionEntriesEqual (PHASE-1.md §7).
-        const upsertConflicted = sessionCasValueCompareEnabled()
-          ? !sqliteSessionEntriesEqual(currentEntry, expectedCurrentEntry)
-          : actualRevision !== expectedRevision;
+        // Integer revision compare.
+        const upsertConflicted = actualRevision !== expectedRevision;
         if (upsertConflicted) {
           if (sameKeyRemoval) {
             // Genuine invariant, not a race: this key is also being removed
@@ -489,11 +477,8 @@ export async function applySessionEntryLifecycleMutation(params: {
           removal,
           params.allowCanonicalRepair,
         );
-        // Default (flag off): integer revision compare. Flag on: legacy
-        // value-compare via sqliteSessionEntriesEqual (PHASE-1.md §7).
-        const removalConflicted = sessionCasValueCompareEnabled()
-          ? !sqliteSessionEntriesEqual(entry, removal.expectedEntry)
-          : actualRevision !== removal.expectedRevision;
+        // Integer revision compare.
+        const removalConflicted = actualRevision !== removal.expectedRevision;
         if (removalConflicted) {
           throw new SessionConflictError({
             actualRevision,
