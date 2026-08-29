@@ -3,7 +3,7 @@
 // structural exceptions to the revision-CAS conversion — both are documented
 // "entry-CAS-snapshot-structural" (PHASE-1.md §4 escape hatch): their input
 // snapshots do not carry a `session_nodes.revision` correlation, so both
-// keep the legacy value-compare. Shape parity is satisfied by always
+// keep the structural value-compare. Shape parity is satisfied by always
 // throwing SessionConflictError instead of a bare Error. Both are exercised
 // directly against the exported unit functions (not through the full
 // cleanup-artifact orchestration, which needs unrelated marker/prefix
@@ -80,7 +80,7 @@ describe("session lifecycle-state entry-CAS-snapshot-structural (T-P1h)", () => 
     // Land a competing transcript mutation after the snapshot was captured
     // — this is a session_windows/transcript_events-derived snapshot with
     // no session_nodes.revision correlation, so the recompare stays on
-    // value-compare in both modes (structural exception).
+    // value-compare only (structural exception).
     runOpenClawAgentWriteTransaction(
       (transactionDb) => {
         touchTranscriptMutationInTransaction(transactionDb, sessionId);
@@ -129,7 +129,7 @@ describe("session lifecycle-state entry-CAS-snapshot-structural (T-P1h)", () => 
     // Land a competing entry mutation after the removal plan captured its
     // expected entry — SessionEntryRemovalPlan is produced by three
     // independent bulk-read call sites, none of which currently carry
-    // revision, so this stays on value-compare in both modes (documented
+    // revision, so this stays on value-compare only (documented
     // shared-3-producers exception).
     await applySessionEntryLifecycleMutation({
       skipMaintenance: true,
