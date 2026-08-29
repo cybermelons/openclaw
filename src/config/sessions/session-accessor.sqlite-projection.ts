@@ -225,8 +225,8 @@ function readProjectedRemovalEntry(
     // Doctor-repair-only path: the caller's snapshot is a raw entry_json blob
     // captured outside the row-with-revision seam (malformed rows that cannot
     // parse into SessionEntry carry no correlated revision at capture time).
-    // Revision-compare doesn't cleanly apply here — kept on raw-value compare
-    // in both modes, shape-parity only (SessionConflictError, sentinel -1s).
+    // Revision-compare doesn't cleanly apply here — kept on raw-value compare,
+    // shape-parity only (SessionConflictError, sentinel -1s).
     throw new SessionConflictError({
       actualRevision: -1,
       expectedRevision: -1,
@@ -637,7 +637,7 @@ export async function purgeDeletedAgentSessionEntries(
       // per-entry revision compare — orthogonal to session_nodes.revision,
       // analogous to the alias-row structural guards CS-3a left untouched.
       // The per-entry CAS check is assertPlannedLifecycleArtifactEntriesUnchanged
-      // immediately below. Both modes keep the key-set value-compare; shape
+      // immediately below. This stays a key-set value-compare; shape
       // parity is satisfied by always throwing SessionConflictError.
       if (JSON.stringify(currentOwnedSessionKeys) !== JSON.stringify(plannedSessionKeys)) {
         throw new SessionConflictError({

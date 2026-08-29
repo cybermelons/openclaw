@@ -187,7 +187,7 @@ export function assertSessionEntrySelectionUnchanged(
   operationLabel: string,
 ): void {
   // The alias/selected-rows key-set guard is orthogonal to the primary
-  // revision/value compare and stays as a structural check in both modes
+  // revision/value compare and stays as a structural check
   // (PHASE-1.md CS-3a scope note: not deleted, not converted).
   if (
     sessionEntrySelectionPrimaryConflicted(expected, current) ||

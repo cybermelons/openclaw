@@ -252,7 +252,7 @@ export function deleteMaterializedSessionStatePlans(
     const currentSnapshot = readSessionStateDeleteSnapshot(database.db, plan.sessionId);
     // Entry-CAS-snapshot-structural (PHASE-1.md §4 escape hatch): this
     // snapshot spans multiple tables, not one session_nodes row, so it
-    // carries no `revision` — value-compare in both modes; shape parity
+    // carries no `revision` — value-compare only; shape parity
     // via always throwing SessionConflictError.
     if (!sqliteSessionStateDeleteSnapshotsEqual(currentSnapshot, plan.snapshot)) {
       throw new SessionConflictError({
@@ -374,7 +374,7 @@ export async function projectSessionEntryLifecycleMutation(
         // Doctor-repair-only raw-JSON compare (see session-accessor.sqlite-projection.ts
         // readProjectedRemovalEntry for the identical justification): the caller's
         // snapshot is an unparseable raw blob with no correlated row revision at
-        // capture time. Kept on raw-value compare in both modes, shape-parity only.
+        // capture time. Kept on raw-value compare, shape-parity only.
         throw new SessionConflictError({
           actualRevision: -1,
           expectedRevision: -1,
@@ -822,7 +822,7 @@ export function assertPlannedLifecycleArtifactEntriesUnchanged(
 ): void {
   // Entry-CAS-snapshot-structural (PHASE-1.md §4 escape hatch): `entries`
   // is produced by 3 independent bulk-read call sites, none of which
-  // select `revision` — value-compare in both modes; shape parity via
+  // select `revision` — value-compare only; shape parity via
   // always throwing SessionConflictError.
   for (const planned of entries) {
     const currentRow = readExactSessionEntryRow(database, planned.sessionKey);
