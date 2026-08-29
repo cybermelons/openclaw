@@ -98,6 +98,7 @@ type ChatAbortRunState = SessionScopeHost & {
   chatRunId?: string | null;
   lastError?: string | null;
   chatError?: string | null;
+  sessionsResult?: SessionsListResult | null;
 };
 
 type ChatAbortIntentBase = {
@@ -158,6 +159,39 @@ function abortResultDidWork(result: unknown): boolean {
 
 export function isChatBusy(host: { chatSending?: boolean; chatRunId?: string | null }) {
   return Boolean(host.chatSending || host.chatRunId);
+}
+
+// Single source of truth for "which run ids are actually live for this
+// session right now, per the server". A client-held run id (e.g.
+// state.chatRunId) is correlation only — it names a run the client believes
+// is active, but only a confirmed server row can prove that. Any privileged
+// action (Stop, Steer) that trusts a bare client-held run id without
+// checking it against this set can target a stale or already-finished run.
+// Both currentChatAbortIntent (Stop) and resolveSteerTarget (Steer) resolve
+// through this function so they share one notion of "authoritative".
+//
+// Row matching uses uiSessionRowMatchesSelectedChat — the canonical, broader
+// matcher (it is a superset of areUiSessionKeysEquivalent: it additionally
+// recognizes a global-alias row as matching a global-scoped agent session).
+export function resolveAuthoritativeSessionRunIds(
+  host: Pick<Parameters<typeof uiSessionRowMatchesSelectedChat>[0], "agentsList" | "hello">,
+  sessionKey: string,
+  sessionsResult: SessionsListResult | null | undefined,
+): { rows: GatewaySessionRow[]; runIds: Set<string> } {
+  const rows =
+    sessionsResult?.sessions.filter((row) =>
+      uiSessionRowMatchesSelectedChat(host, row.key, sessionKey),
+    ) ?? [];
+  const runIds = new Set(
+    rows.flatMap((row) => [
+      ...(row.hasActiveRun ? (row.activeRunIds ?? []) : []),
+      // Subagent-only activity opens the admission gate but keeps its run ids
+      // out of activeRunIds; without these a Steer/Stop at a background run
+      // is unresolvable (#45).
+      ...(row.activeSubagentRunIds ?? []),
+    ]),
+  );
+  return { rows, runIds };
 }
 
 export function hasAbortableSessionRun(host: {
@@ -240,14 +274,40 @@ function currentChatAbortIntent(
   state: ChatAbortRunState,
   sourceClient: GatewayBrowserClient,
 ): ChatAbortIntent {
-  const runId = state.chatRunId ?? null;
   const base = {
     sourceClient,
     sessionKey: state.sessionKey,
     ...scopedAgentParamsForSession(state, state.sessionKey),
   };
-  return runId
-    ? { ...base, runId }
+  const { rows, runIds } = resolveAuthoritativeSessionRunIds(
+    state,
+    state.sessionKey,
+    state.sessionsResult,
+  );
+  const trimmed = state.chatRunId?.trim() || null;
+  // No confirmed server row for this session exists to disprove chatRunId
+  // (e.g. a freshly started run with no row yet): fall back to today's local
+  // optimism rather than losing the ability to stop it. Mirrors
+  // hasAbortableSessionRun's "no server row to disprove it" fallback.
+  //
+  // When a client-held chatRunId exists but the server does not list it, it is
+  // stale; substitute the single live run so Stop still targets a real run.
+  // That substitution is gated on a stale id EXISTING: an ABSENT chatRunId
+  // (e.g. a channel reply with no browser-local run) must fall through to
+  // session-wide sessions.abort {clearQueued}, which also clears queued
+  // followups. Promoting an absent id to an exact-run chat.abort would leave
+  // the queue intact and let a followup run after Stop — the silent
+  // "Stop didn't stop" class this resolver exists to prevent.
+  const exactRunId =
+    rows.length === 0
+      ? trimmed
+      : trimmed && runIds.has(trimmed)
+        ? trimmed
+        : trimmed && runIds.size === 1
+          ? [...runIds][0]
+          : undefined;
+  return exactRunId
+    ? { ...base, runId: exactRunId }
     : {
         ...base,
         runId: null,

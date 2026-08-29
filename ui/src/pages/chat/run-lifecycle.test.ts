@@ -13,6 +13,7 @@ import {
   reconcileChatRunLifecycle,
   reconcileStaleChatRunAfterSessionStatePublication,
   replayPendingChatAbort,
+  resolveAuthoritativeSessionRunIds,
 } from "./run-lifecycle.ts";
 
 type ReconcileHost = Parameters<typeof reconcileChatRunFromCurrentSessionRow>[0];
@@ -28,6 +29,51 @@ type TestRow = {
 function makeSessionsResult(rows: TestRow[]): SessionsListResult {
   return { sessions: rows } as unknown as SessionsListResult;
 }
+
+describe("resolveAuthoritativeSessionRunIds", () => {
+  const host = { agentsList: null, hello: null };
+
+  it("returns an empty set when there are no rows", () => {
+    const { rows, runIds } = resolveAuthoritativeSessionRunIds(host, "agent:main", undefined);
+    expect(rows).toEqual([]);
+    expect(runIds.size).toBe(0);
+  });
+
+  it("includes activeRunIds only when hasActiveRun is true", () => {
+    const sessionsResult = makeSessionsResult([
+      { key: "agent:main", hasActiveRun: true, activeRunIds: ["run-a", "run-b"] },
+    ]);
+    const { runIds } = resolveAuthoritativeSessionRunIds(host, "agent:main", sessionsResult);
+    expect(runIds).toEqual(new Set(["run-a", "run-b"]));
+  });
+
+  it("includes activeSubagentRunIds for a subagent-only row", () => {
+    const sessionsResult = makeSessionsResult([
+      {
+        key: "agent:main",
+        hasActiveRun: false,
+        activeRunIds: ["run-a"],
+        activeSubagentRunIds: ["run-sub"],
+      } as TestRow & { activeSubagentRunIds: string[] },
+    ]);
+    const { runIds } = resolveAuthoritativeSessionRunIds(host, "agent:main", sessionsResult);
+    expect(runIds).toEqual(new Set(["run-sub"]));
+  });
+
+  it("unions run ids across multiple matching rows", () => {
+    const sessionsResult = makeSessionsResult([
+      { key: "agent:main:main", hasActiveRun: true, activeRunIds: ["run-a"] },
+      {
+        key: "agent:main:main",
+        hasActiveRun: false,
+        activeSubagentRunIds: ["run-sub"],
+      } as TestRow & { activeSubagentRunIds: string[] },
+    ]);
+    const { rows, runIds } = resolveAuthoritativeSessionRunIds(host, "main", sessionsResult);
+    expect(rows.length).toBe(2);
+    expect(runIds).toEqual(new Set(["run-a", "run-sub"]));
+  });
+});
 
 describe("hasAbortableSessionRun", () => {
   it("recognizes the canonical main row while chat uses its main alias", () => {
@@ -152,6 +198,163 @@ describe("handleAbortChat", () => {
     expect(host.chatMessage).toBe("keep this draft");
     expect(host.chatError ?? null).toBeNull();
     expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("currentChatAbortIntent authority validation", () => {
+  it("stops the exact run when chatRunId is confirmed in the authoritative set", async () => {
+    const request = vi.fn(async () => ({ aborted: true }));
+    const host = makeAbortHost({
+      client: { request } as unknown as GatewayBrowserClient,
+      chatRunId: "run-live",
+      sessionsResult: makeSessionsResult([
+        { key: "agent:main", hasActiveRun: true, activeRunIds: ["run-live"] },
+      ]),
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenCalledWith("chat.abort", {
+      sessionKey: "agent:main",
+      runId: "run-live",
+    });
+  });
+
+  // Regression test for the Stop-path authority bug: a stale local chatRunId
+  // must not be trusted once a confirmed server row proves it is no longer
+  // in the authoritative set. With exactly one live run, the stale id is
+  // substituted with that run so Stop still targets a real, live run rather
+  // than the stale one. This must FAIL on pre-fix code, which trusted
+  // chatRunId unconditionally and would have aborted "run-stale".
+  it("substitutes the single live run when chatRunId is stale per the server row", async () => {
+    const request = vi.fn(async () => ({ aborted: true }));
+    const host = makeAbortHost({
+      client: { request } as unknown as GatewayBrowserClient,
+      chatRunId: "run-stale",
+      sessionsResult: makeSessionsResult([
+        { key: "agent:main", hasActiveRun: true, activeRunIds: ["run-fresh"] },
+      ]),
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenCalledWith("chat.abort", {
+      sessionKey: "agent:main",
+      runId: "run-fresh",
+    });
+    expect(request).not.toHaveBeenCalledWith(
+      "chat.abort",
+      expect.objectContaining({ runId: "run-stale" }),
+    );
+  });
+
+  // A stale chatRunId with NO live runs cannot substitute anything; Stop must
+  // widen to a session-wide sessions.abort {clearQueued} rather than replaying
+  // the stale exact-run id (which would abort nothing and strand the queue).
+  it("widens to a session-wide stop when chatRunId is stale and no run is live", async () => {
+    const request = vi.fn(async () => ({ aborted: true }));
+    const host = makeAbortHost({
+      client: { request } as unknown as GatewayBrowserClient,
+      chatRunId: "run-stale",
+      sessionsResult: makeSessionsResult([
+        { key: "agent:main", hasActiveRun: false, activeRunIds: [] },
+      ]),
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenCalledWith("sessions.abort", {
+      key: "agent:main",
+      clearQueued: true,
+    });
+    expect(request).not.toHaveBeenCalledWith(
+      "chat.abort",
+      expect.objectContaining({ runId: "run-stale" }),
+    );
+  });
+
+  // A stale chatRunId with MULTIPLE live runs is ambiguous — no single run can
+  // be substituted — so Stop widens to a session-wide sessions.abort.
+  it("widens to a session-wide stop when chatRunId is stale and multiple runs are live", async () => {
+    const request = vi.fn(async () => ({ aborted: true }));
+    const host = makeAbortHost({
+      client: { request } as unknown as GatewayBrowserClient,
+      chatRunId: "run-stale",
+      sessionsResult: makeSessionsResult([
+        { key: "agent:main", hasActiveRun: true, activeRunIds: ["run-a", "run-b"] },
+      ]),
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenCalledWith("sessions.abort", {
+      key: "agent:main",
+      clearQueued: true,
+    });
+    expect(request).not.toHaveBeenCalledWith(
+      "chat.abort",
+      expect.objectContaining({ runId: "run-stale" }),
+    );
+  });
+
+  // An ABSENT chatRunId (e.g. a channel reply with no browser-local run) must
+  // NOT be promoted to an exact-run chat.abort even when exactly one run is
+  // live: exact-run chat.abort leaves the queue intact, so a queued followup
+  // could run after Stop. The single-run substitution is gated on a stale id
+  // existing; absent falls through to session-wide sessions.abort {clearQueued},
+  // which also clears the queue. This must FAIL on the first-cut fix, which
+  // substituted the single live run for an absent id too.
+  it("widens to a session-wide stop (clearing the queue) when chatRunId is absent", async () => {
+    const request = vi.fn(async () => ({ aborted: true }));
+    const host = makeAbortHost({
+      client: { request } as unknown as GatewayBrowserClient,
+      chatRunId: null,
+      sessionsResult: makeSessionsResult([
+        { key: "agent:main", hasActiveRun: true, activeRunIds: ["run-only"] },
+      ]),
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenCalledWith("sessions.abort", {
+      key: "agent:main",
+      clearQueued: true,
+    });
+    expect(request).not.toHaveBeenCalledWith("chat.abort", expect.anything());
+  });
+
+  it("goes session-wide when chatRunId is absent and multiple runs are live", async () => {
+    const request = vi.fn(async () => ({ aborted: true }));
+    const host = makeAbortHost({
+      client: { request } as unknown as GatewayBrowserClient,
+      chatRunId: null,
+      sessionsResult: makeSessionsResult([
+        { key: "agent:main", hasActiveRun: true, activeRunIds: ["run-a", "run-b"] },
+      ]),
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenCalledWith("sessions.abort", {
+      key: "agent:main",
+      clearQueued: true,
+    });
+  });
+
+  it("preserves optimism and stops by chatRunId when no server row exists yet", async () => {
+    const request = vi.fn(async () => ({ aborted: true }));
+    const host = makeAbortHost({
+      client: { request } as unknown as GatewayBrowserClient,
+      chatRunId: "run-fresh-optimistic",
+      sessionsResult: makeSessionsResult([]),
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenCalledWith("chat.abort", {
+      sessionKey: "agent:main",
+      runId: "run-fresh-optimistic",
+    });
   });
 });
 
