@@ -29,6 +29,7 @@ import type {
 import { WorkerRunnerCapacityError, WorkerRunnerUnavailableError } from "./tunnel-contract.js";
 import { resolveWorkerBrowserLaunchPlan } from "./worker-browser-launch-plan.js";
 import {
+  claimLocalTurn,
   claimWorkerTurn,
   rejectPendingWorkerResult,
   releaseClaimIfOwned,
@@ -76,13 +77,14 @@ async function executeLocalTurn<T>(params: {
   claim: LocalTurnPlacementClaim;
   placements: WorkerSessionPlacementStore;
   runLocal: () => Promise<T>;
+  signal?: AbortSignal;
 }): Promise<T> {
   const current = params.placements.get(params.claim.sessionId);
-  const turnClaim = params.placements.claimTurn({
-    ...resolvePlacementIdentity(params.claim, current),
-    claimId: randomUUID(),
+  const turnClaim = await claimLocalTurn({
+    placements: params.placements,
+    identity: resolvePlacementIdentity(params.claim, current),
     runId: params.claim.runId,
-    owner: { kind: "local" },
+    ...(params.signal ? { signal: params.signal } : {}),
   });
   try {
     return await params.runLocal();
@@ -449,7 +451,12 @@ export function createWorkerSessionTurnPlacementProvider(options: WorkerTurnLaun
         return await runLocal();
       }
       if (!current || current.state === "local") {
-        return await executeLocalTurn({ claim, placements: options.placements, runLocal });
+        return await executeLocalTurn({
+          claim,
+          placements: options.placements,
+          runLocal,
+          ...(turn.abortSignal ? { signal: turn.abortSignal } : {}),
+        });
       }
       let routablePlacement = current;
       if (routablePlacement.state === "reclaimed") {

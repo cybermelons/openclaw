@@ -158,6 +158,56 @@ export async function releaseClaimIfOwned(
   }
 }
 
+/**
+ * Claims a local turn, retrying once if admission collides with a claim that is
+ * mid-release. A stop only aborts the running turn's signal; the claim itself is
+ * released by that turn's own `finally` block once its promise chain unwinds. A
+ * new turn dispatched in that narrow window must wait for the release rather than
+ * surface the raw `ActiveTurnClaimError` (see issue #55).
+ */
+export async function claimLocalTurn(params: {
+  placements: WorkerSessionPlacementStore;
+  identity: ReturnType<typeof resolvePlacementIdentity>;
+  runId: string;
+  signal?: AbortSignal;
+}): Promise<WorkerSessionTurnClaim> {
+  const claim = () =>
+    params.placements.claimTurn({
+      ...params.identity,
+      claimId: randomUUID(),
+      runId: params.runId,
+      owner: { kind: "local" },
+    });
+  try {
+    return claim();
+  } catch (error) {
+    if (!(error instanceof ActiveTurnClaimError)) {
+      throw error;
+    }
+    const activeClaim = params.placements.get(params.identity.sessionId)?.turnClaim;
+    if (activeClaim?.runId === params.runId) {
+      // The claim is not stale or draining; it belongs to this same run
+      // (a genuine double-submit), so surface admission failure immediately.
+      throw error;
+    }
+    try {
+      await params.placements.waitForTurnClaimRelease(params.identity.sessionId, {
+        timeoutMs: SESSION_WORK_ADMISSION_DRAIN_TIMEOUT_MS,
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+    } catch (waitError) {
+      if (params.signal?.aborted) {
+        throw waitError;
+      }
+      // The wait timed out rather than being aborted: the prior claim did not
+      // release within the drain window. Surface the original typed error so
+      // callers can distinguish this from a generic failure.
+      throw error;
+    }
+    return claim();
+  }
+}
+
 export async function claimWorkerTurn(params: {
   placements: WorkerSessionPlacementStore;
   identity: ReturnType<typeof resolvePlacementIdentity>;
