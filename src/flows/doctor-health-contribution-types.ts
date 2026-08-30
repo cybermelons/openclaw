@@ -41,6 +41,8 @@ export type DoctorHealthFlowContext = {
   configResultWriteCommitted?: boolean;
   /** The requested config write was refused; later repairs must not consume its candidate. */
   configWriteRefusal?: "validation" | "cron-owner-safety";
+  /** A legacy-state migration fault (e.g. an unrepairable schema fault) remained after the fix attempt. */
+  legacyStateRepairFailed?: boolean;
   /** One-shot repairs that require a durable config write have completed. */
   postConfigWriteRepairsCommitted?: boolean;
   sourceConfigValid: boolean;
