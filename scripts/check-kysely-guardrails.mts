@@ -86,6 +86,7 @@ const rawSqliteAllowPathGroups = {
     "src/agents/harness/native-hook-relay-client-store.ts",
   ],
   "read-only schema preflight and integrity verification access": [
+    "src/state/openclaw-agent-db-open-validation.ts",
     "src/state/openclaw-database-preflight.ts",
     "src/state/openclaw-database-verify.worker.ts",
     "src/state/openclaw-state-ownership.ts",

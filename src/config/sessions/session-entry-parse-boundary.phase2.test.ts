@@ -81,7 +81,7 @@ function importedGuardedSymbols(source: string): string[] {
   const found = new Set<string>();
   for (const match of source.matchAll(SESSION_ENTRY_PARSE_IMPORT_RE)) {
     const names = new Set(
-      match[1]
+      match[1]!
         .split(",")
         .map((entry) =>
           entry
@@ -117,10 +117,10 @@ const RAW_TABLE_SQL_RE = new RegExp(
 function referencedProjectionTables(source: string): Set<string> {
   const tables = new Set<string>();
   for (const match of source.matchAll(KYSELY_TABLE_SQL_RE)) {
-    tables.add(match[1]);
+    tables.add(match[1]!);
   }
   for (const match of source.matchAll(RAW_TABLE_SQL_RE)) {
-    tables.add(match[1].toLowerCase());
+    tables.add(match[1]!.toLowerCase());
   }
   return tables;
 }
@@ -262,7 +262,7 @@ describe("session-entry-parse boundary fence (Phase 2 CS-5, §7)", () => {
     "FENCE 2: the $name fingerprint appears only inside its sanctioned file(s)",
     async ({ token }) => {
       const all = await loadSources();
-      const allowed = REASSEMBLY_FINGERPRINT_ALLOWED_FILES[token];
+      const allowed = REASSEMBLY_FINGERPRINT_ALLOWED_FILES[token]!;
       const offenders = all
         .filter(({ relative, source }) => !isTestSourceFile(relative) && source.includes(token))
         .map(({ relative }) => relative)
@@ -332,7 +332,7 @@ describe("session-entry-parse boundary fence (Phase 3 CS-5, §6/§8) — FENCE 3
         continue;
       }
       for (const column of ALL_DEMOTED_COLUMNS) {
-        if (new RegExp(`["'](?:\\w+\\.)?${column}["']`, "u").test(selectMatch[1])) {
+        if (new RegExp(`["'](?:\\w+\\.)?${column}["']`, "u").test(selectMatch[1]!)) {
           found.add(column);
         }
       }
@@ -353,7 +353,7 @@ describe("session-entry-parse boundary fence (Phase 3 CS-5, §6/§8) — FENCE 3
       "giu",
     );
     for (const match of source.matchAll(selectClauseRe)) {
-      const columnList = match[1];
+      const columnList = match[1]!;
       for (const column of ALL_DEMOTED_COLUMNS) {
         if (new RegExp(`(^|[\\s,(])${column}([\\s,)]|$)`, "u").test(columnList)) {
           found.add(column);
