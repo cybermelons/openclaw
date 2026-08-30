@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { loadSessionEntry } from "../../../config/sessions/session-accessor.js";
 import * as agentEvents from "../../../infra/agent-events.js";
-import { formatSystemTurnPrompt } from "../../../sessions/system-turn-prompt.js";
-import { truncateUtf16Safe } from "../../../utils.js";
+import { buildGatewayRestartResumePrompt } from "../../gateway-restart-resume-prompt.js";
 import type {
   SubagentRestartRecoveryReceipt,
   SubagentRunRecord,
@@ -29,15 +28,7 @@ export function isRestartRecoveryLifecycleCurrent(
 }
 
 export function buildRestartRecoveryResumeMessage(task: string, lastHumanMessage?: string): string {
-  const original = task.length > 2_000 ? `${truncateUtf16Safe(task, 2_000)}...` : task;
-  return formatSystemTurnPrompt(
-    `Your previous turn was interrupted by a gateway restart. ` +
-      `Your original task was:\n\n${original}\n\n` +
-      (lastHumanMessage
-        ? `The last message from the user before the interruption was:\n\n${lastHumanMessage}\n\n`
-        : "") +
-      `Please continue where you left off.`,
-  );
+  return buildGatewayRestartResumePrompt(task, lastHumanMessage);
 }
 
 export function buildRestartRecoveryIdempotencyKey(runId: string, sessionMarker: string): string {

@@ -1,4 +1,5 @@
 import type { GatewayRecoveryRuntime } from "../../../gateway/server-instance-runtime.types.js";
+import { buildGatewayRestartRecoveryFailureError } from "../../gateway-restart-resume-prompt.js";
 import { getLatestSubagentRunByChildSessionKeyFromRuns } from "./subagent-registry-queries.js";
 import type {
   RestartRecoveryParams,
@@ -167,10 +168,7 @@ export function createInterruptedRecoveryCoordinator(params: RecoveryCoordinator
       defer(runId, { entry, attempts, error: result.error }, 1_000 * 2 ** (attempts - 1));
       return true;
     }
-    const error =
-      `Subagent run was interrupted by a gateway restart or connection loss. ` +
-      `Automatic recovery failed after ${attempts} attempts. Please retry.` +
-      (result.error.trim() ? ` (${result.error.trim()})` : "");
+    const error = buildGatewayRestartRecoveryFailureError(attempts, result.error);
     await projectTerminal(runId, { entry, attempts: 0, at: now, error, terminal: true });
     return true;
   }
