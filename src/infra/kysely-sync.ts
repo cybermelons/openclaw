@@ -2,6 +2,7 @@
 import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import type { Compilable, CompiledQuery, Kysely, QueryResult } from "kysely";
 import { InsertQueryNode, Kysely as KyselyInstance, SqliteDialect } from "kysely";
+import { getChildLogger } from "../logging/logger.js";
 import {
   clearNodeSqliteKyselyCacheForDatabase,
   kyselyByDatabase,
@@ -226,11 +227,90 @@ function executeWithCachedStatement<Result>(
   }
 }
 
+// Phase 3 CS-5/CS-7 runtime soak tripwire (PHASE-3.md §4.2 step 3, §8(b)).
+// Logs a live SELECT of the VALUE of a droppable session_windows column
+// outside the sanctioned carve-out, so a full soak release cycle can prove
+// zero readers remain before CS-7 drops the columns. This hook sees the
+// final compiled SQL string, so it catches dynamic/builder-composed SQL
+// that a source-level grep cannot see (§8(b)). It mirrors the detection
+// semantics of the static merge-time proxy
+// (session-droppable-column-tripwire.phase3.test.ts) exactly, so the two
+// must never diverge on what counts as "a SELECT of the value": a named
+// SELECT of the column in the select-list, not a bare WHERE/ORDER BY
+// filter/sort use.
+const DROPPABLE_SESSION_WINDOWS_COLUMNS = ["status", "display_name"] as const;
+const DROPPABLE_COLUMN_TRIPWIRE_CARVE_OUT_PATH = "config/sessions/session-accessor.sqlite-history";
+// This module's own frames precede the real caller in the captured stack;
+// skip past them by name instead of depending on import.meta.filename.
+const DROPPABLE_COLUMN_TRIPWIRE_OWN_FILE = "kysely-sync";
+// Compiled Kysely SQL quotes identifiers (`select "status" from "session_windows"`),
+// unlike the developer-typed raw-SQL strings the static proxy's regex targets.
+// Allow an optional wrapping double-quote around both the FROM target and
+// each column-list token so this matches the real compiled shape.
+const droppableColumnSelectClauseRe = /\bSELECT\b([^;]*?)\bFROM\b\s+"?session_windows"?\b/giu;
+
+function rawSqlSelectedDroppableColumns(sql: string): string[] {
+  const found: string[] = [];
+  droppableColumnSelectClauseRe.lastIndex = 0;
+  for (const match of sql.matchAll(droppableColumnSelectClauseRe)) {
+    const columnList = match[1] ?? "";
+    for (const column of DROPPABLE_SESSION_WINDOWS_COLUMNS) {
+      if (
+        new RegExp(`(^|[\\s,(])(?:"?\\w+"?\\.)?"?${column}"?([\\s,)]|$)`, "u").test(columnList) &&
+        !found.includes(column)
+      ) {
+        found.push(column);
+      }
+    }
+  }
+  return found;
+}
+
+/** True when the nearest resolvable stack frame is the sanctioned carve-out reader. */
+function stackHitsDroppableColumnCarveOut(stack: string | undefined): boolean {
+  return stack !== undefined && stack.includes(DROPPABLE_COLUMN_TRIPWIRE_CARVE_OUT_PATH);
+}
+
+/**
+ * Log-only soak tripwire: never throws, never alters control flow, never
+ * runs the (relatively expensive) stack capture unless a droppable-column
+ * SELECT was actually detected in the compiled SQL.
+ */
+function reportDroppableSessionWindowsColumnSelect(sql: string): void {
+  try {
+    const columns = rawSqlSelectedDroppableColumns(sql);
+    if (columns.length === 0) {
+      return;
+    }
+    const stack = new Error().stack;
+    if (stackHitsDroppableColumnCarveOut(stack)) {
+      return;
+    }
+    const callSite =
+      stack
+        ?.split("\n")
+        .slice(1)
+        .find((frame) => !frame.includes(DROPPABLE_COLUMN_TRIPWIRE_OWN_FILE))
+        ?.trim() ?? "unknown call site";
+    getChildLogger({ subsystem: "session-windows-soak-tripwire" }).warn(
+      "live SELECT of a droppable session_windows column value",
+      {
+        columns,
+        callSite,
+        sql: sql.length > 500 ? `${sql.slice(0, 500)}...(truncated)` : sql,
+      },
+    );
+  } catch {
+    // Soak observation must never affect the read path it is watching.
+  }
+}
+
 /** Execute a compiled Kysely query synchronously against node:sqlite. */
 function executeCompiledSqliteQuerySync<Row>(
   db: DatabaseSync,
   compiledQuery: CompiledQuery<Row>,
 ): QueryResult<Row> {
+  reportDroppableSessionWindowsColumnSelect(compiledQuery.sql);
   const parameters = compiledQuery.parameters as SQLInputValue[];
   try {
     return executeWithCachedStatement(db, compiledQuery.sql, parameters, (statement) => {
@@ -283,6 +363,7 @@ export function* iterateSqliteQuerySync<Row>(
   query: Compilable<Row>,
 ): IterableIterator<Row> {
   const compiledQuery = query.compile();
+  reportDroppableSessionWindowsColumnSelect(compiledQuery.sql);
   try {
     // Iterators keep statement state across yields. A private statement prevents
     // nested iteration of identical SQL from resetting an earlier iterator.
