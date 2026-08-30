@@ -128,6 +128,75 @@ describe("worker turn launcher claim admission", () => {
     ).rejects.toThrow("Active worker placement does not match its attached environment");
   });
 
+  it("retries local turn admission when a stopped run's claim releases before inspection", async () => {
+    const provider = createWorkerSessionTurnPlacementProvider({
+      environments: unusedEnvironments(),
+      placements,
+    });
+    const identity = {
+      sessionId: SESSION_ID,
+      sessionKey: SESSION_KEY,
+      agentId: "main",
+    };
+    // Simulates a stopped run: its turn is claimed but not yet released because
+    // the abort only signals the run's controller — release happens later, in
+    // that run's own `finally` block, once its promise chain unwinds.
+    const priorClaim = placements.claimTurn({
+      ...identity,
+      claimId: "stopped-run-claim",
+      runId: "stopped-run",
+      owner: { kind: "local" },
+    });
+
+    const waitForRelease = vi
+      .spyOn(placements, "waitForTurnClaimRelease")
+      .mockImplementationOnce(async () => {
+        // Release arrives asynchronously, mid-wait, mirroring the stopped run's
+        // delayed `finally` completing after the new turn has already started
+        // waiting for admission.
+        placements.releaseTurn(priorClaim);
+      });
+
+    await expect(
+      provider.executeTurn(
+        { ...identity, runId: "next-run-after-stop" },
+        turn("next-run-after-stop"),
+        async () => ({ meta: { durationMs: 1 } }),
+      ),
+    ).resolves.toMatchObject({ meta: { durationMs: 1 } });
+    expect(waitForRelease).toHaveBeenCalledWith(SESSION_ID, { timeoutMs: 15_000 });
+    expect(placements.get(SESSION_ID)).toMatchObject({ state: "local", turnClaim: null });
+  });
+
+  it("surfaces ActiveTurnClaimError when a local claim never releases within the drain window", async () => {
+    const provider = createWorkerSessionTurnPlacementProvider({
+      environments: unusedEnvironments(),
+      placements,
+    });
+    const identity = {
+      sessionId: SESSION_ID,
+      sessionKey: SESSION_KEY,
+      agentId: "main",
+    };
+    placements.claimTurn({
+      ...identity,
+      claimId: "still-live-claim",
+      runId: "still-live-run",
+      owner: { kind: "local" },
+    });
+    vi.spyOn(placements, "waitForTurnClaimRelease").mockRejectedValueOnce(
+      new Error("Timed out waiting for session turn claim release"),
+    );
+
+    await expect(
+      provider.executeTurn(
+        { ...identity, runId: "next-run-still-blocked" },
+        turn("next-run-still-blocked"),
+        async () => ({ meta: { durationMs: 1 } }),
+      ),
+    ).rejects.toThrow("already has an active turn claim");
+  });
+
   it("does not claim a stale worker after pending-result recovery reclaims it", async () => {
     seedActivePlacement();
     const active = placements.get(SESSION_ID);
