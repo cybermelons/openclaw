@@ -189,6 +189,12 @@ export async function resetSessionEntryLifecycle(
         currentEntry: current ? cloneSessionEntry(current.entry) : undefined,
         primaryKey: params.target.canonicalKey,
       });
+      // Value-compare only (issue #81): `nextEntry` is the caller-built
+      // proposed replacement, not a second DB row snapshot — there is no
+      // `session_nodes.revision` for a value that has not been persisted
+      // yet, so a revision-CAS cannot apply here. This only decides whether
+      // a reset-boundary transcript event is worth building; the actual
+      // concurrency guard is `assertLifecycleTargetUnchanged` below.
       const resetBoundaryPlan =
         params.resetBoundaryReason &&
         current?.entry.sessionId &&
@@ -204,7 +210,7 @@ export async function resetSessionEntryLifecycle(
         ...(current?.entry.sessionId ? { previousSessionId: current.entry.sessionId } : {}),
       };
       runOpenClawAgentWriteTransaction((transactionDb) => {
-        assertLifecycleTargetUnchanged(transactionDb, params.target, current?.entry, "reset");
+        assertLifecycleTargetUnchanged(transactionDb, params.target, current, "reset");
         if (resetBoundaryPlan && current?.entry.sessionId) {
           const events = [...resetBoundaryPlan.seedEvents, resetBoundaryPlan.event];
           const appended = appendTranscriptEventsInTransaction(
@@ -605,6 +611,14 @@ function shouldDeleteSqliteSessionEntryLifecycle(
   if (!entry) {
     return false;
   }
+  // Value-compare only (issue #81): `params.expectedEntry` is a cross-module
+  // API contract value captured by the caller (plugin-runtime rollback
+  // context, migration claim, cron continuation record, gateway
+  // post-cleanup entry, ...) well before this call, never a `session_nodes`
+  // row read in this scope — there is no correlated revision to thread.
+  // `entry` here (the live row's projected value) does have a sibling
+  // `.revision` on every call site, but nothing on the `expectedEntry` side
+  // to compare it against.
   if (
     params.expectedEntry !== undefined &&
     !sqliteSessionEntriesEqual(entry, params.expectedEntry)

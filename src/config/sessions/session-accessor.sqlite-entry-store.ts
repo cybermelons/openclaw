@@ -17,10 +17,7 @@ import {
   publishSessionEntryCacheInvalidation,
   trackSessionEntryCacheWrite,
 } from "./session-accessor.sqlite-entry-cache.js";
-import {
-  sqliteSessionEntriesEqual,
-  sqliteSessionSnapshotRowsEqual,
-} from "./session-accessor.sqlite-entry-equality.js";
+import { sqliteSessionSnapshotRowsEqual } from "./session-accessor.sqlite-entry-equality.js";
 import {
   clearSessionCollaborationForKey,
   deleteSessionDeliveryArtifacts,
@@ -550,28 +547,31 @@ export function deleteLifecycleTargetRows(
   }
 }
 
-function sqliteLifecycleTargetMatchesExpectedEntry(
-  database: OpenClawAgentDatabase,
-  target: { canonicalKey: string; storeKeys: string[] },
-  expectedEntry: SessionEntry | undefined,
-): boolean {
-  const current = resolveLifecyclePrimaryEntry(database, target)?.entry;
-  if (!current || !expectedEntry) {
-    return current === expectedEntry;
-  }
-  return sqliteSessionEntriesEqual(current, expectedEntry);
-}
-
+/**
+ * Integer revision compare (issue #81): `expectedRevision` is the sibling
+ * `.revision` already resolved alongside the caller's `expectedEntry`
+ * snapshot (`resolveLifecyclePrimaryEntry`'s return / `targetSnapshot.primary`),
+ * not a fresh read. `-1` means the caller had no persisted row to compare
+ * against (matches the `SessionConflictError` sentinel convention elsewhere).
+ */
 export function assertLifecycleTargetUnchanged(
   database: OpenClawAgentDatabase,
   target: { canonicalKey: string; storeKeys: string[] },
-  expectedEntry: SessionEntry | undefined,
+  expected: { entry: SessionEntry; revision: number } | undefined,
   operation: "deleted" | "reset",
 ): void {
-  if (sqliteLifecycleTargetMatchesExpectedEntry(database, target, expectedEntry)) {
+  const current = resolveLifecyclePrimaryEntry(database, target);
+  const expectedRevision = expected?.revision ?? -1;
+  const actualRevision = current?.revision ?? -1;
+  if (expectedRevision === actualRevision) {
     return;
   }
-  throw new Error(`SQLite session entry changed before ${operation} lifecycle mutation`);
+  throw new SessionConflictError({
+    actualRevision,
+    expectedRevision,
+    key: target.canonicalKey,
+    message: `SQLite session entry changed before ${operation} lifecycle mutation`,
+  });
 }
 
 export function deleteLegacySessionEntryRows(

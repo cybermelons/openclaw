@@ -58,6 +58,11 @@ export function shouldRemoveSessionEntry(
   // and commit-time (readCanonicalSqliteSessionEntryRow) reads intentionally differ on
   // participants/participantCount when empty (Phase 2 CS-4, §4); raw JSON would treat
   // that shape-only gap as a conflict and drop every removal.
+  // Not converted to revision-compare (issue #81): every caller of
+  // `shouldRemoveSessionEntry` already passed a `session_nodes.revision`
+  // CAS check (`removal.expectedRevision` in sqlite-projection.ts) before
+  // reaching here, so this call is a shape/value invariant on the
+  // already-revision-matched entry, not a second concurrency guard.
   if (
     removal.expectedEntry !== undefined &&
     !sqliteSessionEntriesEqual(entry, removal.expectedEntry)
@@ -823,7 +828,11 @@ export function assertPlannedLifecycleArtifactEntriesUnchanged(
   // Entry-CAS-snapshot-structural (PHASE-1.md §4 escape hatch): `entries`
   // is produced by 3 independent bulk-read call sites, none of which
   // select `revision` — value-compare only; shape parity via
-  // always throwing SessionConflictError.
+  // always throwing SessionConflictError. Revisited for issue #81: adding
+  // `revision` to those 3 selects would touch `readSessionEntryStore`'s
+  // shared `Record<string, SessionEntry>` return type across every one of
+  // its many unrelated callers — out of scope for a revision-thread-only
+  // change; this stays a documented structural exception.
   for (const planned of entries) {
     const currentRow = readExactSessionEntryRow(database, planned.sessionKey);
     if (!sqliteSessionEntriesEqual(currentRow?.entry, planned.expectedEntry)) {

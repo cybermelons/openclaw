@@ -153,6 +153,13 @@ export async function applySessionStoreProjection<T>(params: {
       throw new Error(transitionError ?? storeError);
     }
 
+    // Value-compare only (issue #81): `before`/`projected` are both in-memory
+    // `Record<string, SessionEntry>` snapshots from the same detached-callback
+    // pass (`projected` is `structuredClone(before)` mutated by the caller),
+    // not two DB row reads — no `session_nodes.revision` correlates them.
+    // This is purely the caller's dirty-check; the real concurrency guard is
+    // the `beforeRevisions`-based revision compare inside the write
+    // transaction below (PHASE-1.md §3).
     const changedKeys = uniqueStrings([...Object.keys(before), ...Object.keys(projected)]).filter(
       (sessionKey) => !sqliteSessionEntriesEqual(before[sessionKey], projected[sessionKey]),
     );
