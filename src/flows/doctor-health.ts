@@ -126,6 +126,14 @@ export async function runDoctorHealthFlow(runtime?: RuntimeEnv, options: DoctorO
     effectiveRuntime.exit(1);
     return;
   }
+  if (ctx.legacyStateRepairFailed) {
+    // A legacy-state migration fault (e.g. an unrepairable schema fault)
+    // survived the fix attempt; the warning above already describes it.
+    // Callers keying on exit status must not proceed against unhealthy state.
+    outro("Doctor finished, but legacy state could not be fully repaired.");
+    effectiveRuntime.exit(1);
+    return;
+  }
   if (ctx.postInstallDoctorResult) {
     const {
       UPDATE_POST_INSTALL_DOCTOR_ADVISORY_EXIT_CODE,

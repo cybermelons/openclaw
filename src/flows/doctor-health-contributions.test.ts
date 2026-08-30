@@ -2229,6 +2229,32 @@ describe("doctor health contributions", () => {
     );
   });
 
+  it("flags an unrepaired legacy state schema fault for a non-zero doctor exit", async () => {
+    const contribution = requireDoctorContribution("doctor:legacy-state");
+    const detected = { preview: ["legacy sessions"], warnings: [], notices: [] };
+    mocks.detectLegacyStateMigrations.mockResolvedValue(detected);
+    mocks.runLegacyStateMigrations.mockResolvedValue({
+      changes: [],
+      warnings: ["Failed migrating shared state database schema at /tmp/state.db: corrupt index"],
+    });
+    const ctx = createDoctorHealthFlowContext({
+      cfg: {},
+      configResult: {},
+      sourceConfigValid: true,
+      prompter: buildDoctorPrompter(true),
+      runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
+      options: { nonInteractive: true, repair: true },
+    });
+
+    await contribution.run(ctx);
+
+    expect(mocks.note).toHaveBeenCalledWith(
+      "Failed migrating shared state database schema at /tmp/state.db: corrupt index",
+      "Doctor warnings",
+    );
+    expect(ctx.legacyStateRepairFailed).toBe(true);
+  });
+
   it("skips Gateway health probes for exec SecretRefs unless allow-exec is set", async () => {
     const contribution = requireDoctorContribution("doctor:gateway-health");
     mocks.gatewaySecretInputPathCanWin.mockImplementation(

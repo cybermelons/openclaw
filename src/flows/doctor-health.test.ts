@@ -70,39 +70,50 @@ vi.mock("../infra/update-doctor-result.js", () => ({
   writeUpdatePostInstallDoctorResult: mocks.writeUpdatePostInstallDoctorResult,
 }));
 
-vi.mock("./doctor-health-contributions.js", () => ({
-  runDoctorHealthContributions: async (ctx: {
-    configWriteRefusal?: "cron-owner-safety";
-    postInstallDoctorResult?: {
-      status: "advisory";
-      advisory: {
-        kind: "package-post-install-doctor";
-        message: string;
-        reason: "deferred-configured-plugin-repair";
-        details: string[];
-      };
+type DoctorHealthContributionsMockCtx = {
+  configWriteRefusal?: "cron-owner-safety";
+  legacyStateRepairFailed?: boolean;
+  postInstallDoctorResult?: {
+    status: "advisory";
+    advisory: {
+      kind: "package-post-install-doctor";
+      message: string;
+      reason: "deferred-configured-plugin-repair";
+      details: string[];
     };
-  }) => {
-    ctx.configWriteRefusal = "cron-owner-safety";
-    ctx.postInstallDoctorResult = {
-      status: "advisory",
-      advisory: {
-        kind: "package-post-install-doctor",
-        message: "recoverable plugin repair",
-        reason: "deferred-configured-plugin-repair",
-        details: ["plugin repair deferred"],
-      },
-    };
+  };
+};
+
+const postInstallAdvisory = {
+  status: "advisory" as const,
+  advisory: {
+    kind: "package-post-install-doctor" as const,
+    message: "recoverable plugin repair",
+    reason: "deferred-configured-plugin-repair" as const,
+    details: ["plugin repair deferred"],
   },
+};
+
+const mockRunDoctorHealthContributions = vi.hoisted(() => vi.fn());
+
+vi.mock("./doctor-health-contributions.js", () => ({
+  runDoctorHealthContributions: mockRunDoctorHealthContributions,
 }));
 
 describe("runDoctorHealthFlow", () => {
   beforeEach(() => {
     mocks.outro.mockClear();
     mocks.writeUpdatePostInstallDoctorResult.mockClear();
+    mockRunDoctorHealthContributions.mockReset();
   });
 
   it("reports a cron ownership refusal instead of a recoverable post-install advisory", async () => {
+    mockRunDoctorHealthContributions.mockImplementation(
+      async (ctx: DoctorHealthContributionsMockCtx) => {
+        ctx.configWriteRefusal = "cron-owner-safety";
+        ctx.postInstallDoctorResult = postInstallAdvisory;
+      },
+    );
     const runtime = {
       log: vi.fn(),
       error: vi.fn(),
@@ -120,6 +131,38 @@ describe("runDoctorHealthFlow", () => {
     }
 
     expect(mocks.outro).toHaveBeenCalledWith("Doctor finished, but config fixes were not applied.");
+    expect(mocks.outro).not.toHaveBeenCalledWith("Doctor complete.");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(runtime.exit).not.toHaveBeenCalledWith(86);
+    expect(mocks.writeUpdatePostInstallDoctorResult).not.toHaveBeenCalled();
+  });
+
+  it("exits non-zero when a legacy state schema fault remains unrepaired after --fix", async () => {
+    mockRunDoctorHealthContributions.mockImplementation(
+      async (ctx: DoctorHealthContributionsMockCtx) => {
+        ctx.legacyStateRepairFailed = true;
+        ctx.postInstallDoctorResult = postInstallAdvisory;
+      },
+    );
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+    vi.stubEnv(
+      "OPENCLAW_UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH",
+      "/tmp/openclaw-update-doctor-result.json",
+    );
+
+    try {
+      await runDoctorHealthFlow(runtime, {});
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(mocks.outro).toHaveBeenCalledWith(
+      "Doctor finished, but legacy state could not be fully repaired.",
+    );
     expect(mocks.outro).not.toHaveBeenCalledWith("Doctor complete.");
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(runtime.exit).not.toHaveBeenCalledWith(86);
