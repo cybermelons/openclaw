@@ -74,7 +74,7 @@ function kyselySelectedDroppableColumns(source: string): Set<string> {
       continue;
     }
     for (const column of DROPPABLE_SESSION_WINDOWS_COLUMNS) {
-      if (new RegExp(`["'](?:\\w+\\.)?${column}["']`, "u").test(selectMatch[1])) {
+      if (new RegExp(`["'](?:\\w+\\.)?${column}["']`, "u").test(selectMatch[1]!)) {
         found.add(column);
       }
     }
@@ -88,7 +88,7 @@ function rawSqlSelectedDroppableColumns(source: string): Set<string> {
   for (const match of source.matchAll(selectClauseRe)) {
     const columnList = match[1];
     for (const column of DROPPABLE_SESSION_WINDOWS_COLUMNS) {
-      if (new RegExp(`(^|[\\s,(])${column}([\\s,)]|$)`, "u").test(columnList)) {
+      if (new RegExp(`(^|[\\s,(])${column}([\\s,)]|$)`, "u").test(columnList!)) {
         found.add(column);
       }
     }
