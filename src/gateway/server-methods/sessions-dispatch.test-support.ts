@@ -57,6 +57,7 @@ export function makeReclaimedPlacement(): Extract<
     createdAtMs: 1,
     updatedAtMs: 2,
     stateChangedAtMs: 2,
+    lastProgressAtMs: null,
   };
 }
 

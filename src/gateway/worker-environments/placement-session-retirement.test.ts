@@ -37,6 +37,7 @@ function localPlacement(
     createdAtMs: 1,
     updatedAtMs: 1,
     stateChangedAtMs: 1,
+    lastProgressAtMs: null,
   };
 }
 

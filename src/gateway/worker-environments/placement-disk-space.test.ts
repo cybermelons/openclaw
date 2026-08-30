@@ -33,6 +33,7 @@ function activePlacement(
     createdAtMs: 10,
     updatedAtMs: 20,
     stateChangedAtMs: 15,
+    lastProgressAtMs: null,
     ...overrides,
   };
 }

@@ -30,6 +30,7 @@ const RECORD_BASE = {
   createdAtMs: 100,
   updatedAtMs: 200,
   stateChangedAtMs: 150,
+  lastProgressAtMs: null,
 };
 
 describe("worker placement projection", () => {

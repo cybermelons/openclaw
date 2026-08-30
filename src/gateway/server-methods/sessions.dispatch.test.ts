@@ -484,6 +484,7 @@ describe("sessions.dispatch", () => {
       createdAtMs: 1,
       updatedAtMs: 3,
       stateChangedAtMs: 3,
+      lastProgressAtMs: null,
     };
     const dispatch = vi.fn().mockResolvedValue(dispatchedPlacement);
     const respond = await invoke(
@@ -761,6 +762,7 @@ describe("sessions.dispatch", () => {
       createdAtMs: 1,
       updatedAtMs: 2,
       stateChangedAtMs: 2,
+      lastProgressAtMs: null,
     };
     const dispatch = vi.fn(
       async (

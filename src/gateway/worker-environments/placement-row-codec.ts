@@ -153,6 +153,7 @@ export function fromRow(row: PlacementRow): WorkerSessionPlacementRecord {
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
     stateChangedAtMs: row.state_changed_at_ms,
+    lastProgressAtMs: normalizeTimestamp(row.last_progress_at_ms, "claim progress timestamp"),
   };
   assertRecordShape({ state, executionMode, ...parsed, recoveryError, turnClaim });
   switch (state) {
@@ -328,6 +329,7 @@ function insertLocal(
       recovery_error: null,
       terminal_reason: null,
       terminal_at_ms: null,
+      last_progress_at_ms: null,
       turn_claim_owner: null,
       turn_claim_id: null,
       turn_claim_run_id: null,
@@ -438,6 +440,7 @@ export function transitionValues(
             : required(patch.terminalReason, "terminal reason")
         : null,
     terminal_at_ms: to === "reclaimed" || to === "failed" ? (current.terminalAtMs ?? nowMs) : null,
+    last_progress_at_ms: null,
     turn_claim_owner: null,
     turn_claim_id: null,
     turn_claim_run_id: null,
