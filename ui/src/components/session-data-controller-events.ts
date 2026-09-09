@@ -16,6 +16,8 @@ type SidebarSessionListOwner = {
   sessionsAgentId: SessionListSnapshot["agentId"];
   sessionsLoading: boolean;
   sessionMutationError: string | null;
+  sessionCategoryCatalog: readonly string[];
+  catalogLoaded: boolean;
   expandedAgentId(): string;
   requestSessionDataUpdate(): void;
 };
@@ -36,6 +38,14 @@ export function publishSidebarSessionList(
 ): void {
   owner.sessionsResult = snapshot.result;
   owner.sessionsAgentId = snapshot.agentId;
+  // A payload's `categories` field is authoritative when present. Its
+  // absence means "no change" (list loads always carry it; `sessions.changed`
+  // events omit it when the catalog is unchanged), so the stored catalog and
+  // `catalogLoaded` must never be reset back to false/empty here.
+  if (snapshot.result?.categories) {
+    owner.sessionCategoryCatalog = snapshot.result.categories;
+    owner.catalogLoaded = true;
+  }
   for (const row of snapshot.result?.sessions ?? []) {
     if (row.key && !owner.sessionCreatedOrder.has(row.key)) {
       owner.sessionCreatedOrder.set(row.key, owner.sessionCreatedOrder.size);

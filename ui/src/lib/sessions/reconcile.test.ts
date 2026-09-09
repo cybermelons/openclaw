@@ -609,3 +609,39 @@ describe("reconcileSessionHistory", () => {
     expect(reconciled?.sessions[0]?.derivedTitle).toBeUndefined();
   });
 });
+
+describe("sessions.changed category catalog propagation", () => {
+  test("a sessions.changed event without a categories field does not clear the stored client catalog", () => {
+    const result: SessionsListResult = {
+      ...buildResult([{ key: "agent:main:main", kind: "direct", updatedAt: 1 }]),
+      categories: ["Gita", "Work"],
+    };
+
+    const reconciled = reconcileSessionChanged(result, {
+      sessionKey: "agent:main:main",
+      reason: "patch",
+      updatedAt: 2,
+      label: "Renamed",
+    });
+
+    expect(reconciled.applied).toBe(true);
+    expect(reconciled.result?.categories).toEqual(["Gita", "Work"]);
+  });
+
+  it("a sessions.changed event with a categories field replaces the stored catalog", () => {
+    const result: SessionsListResult = {
+      ...buildResult([{ key: "agent:main:main", kind: "direct", updatedAt: 1 }]),
+      categories: ["Gita"],
+    };
+
+    const reconciled = reconcileSessionChanged(result, {
+      sessionKey: "agent:main:main",
+      reason: "patch",
+      updatedAt: 2,
+      categories: ["Gita", "NewCategory"],
+    } as never);
+
+    expect(reconciled.applied).toBe(true);
+    expect(reconciled.result?.categories).toEqual(["Gita", "NewCategory"]);
+  });
+});

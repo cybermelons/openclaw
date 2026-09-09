@@ -347,6 +347,7 @@ export class AppSidebarSessionNavigationElement extends AppSidebarBase {
         this.sessionsStatusFilter === "archived"
           ? []
           : this.sessionData.sessionCatalogs.map((catalog) => catalog.id),
+      catalogLoaded: this.sessionData.catalogLoaded,
       collapsedSections: this.collapsedSessionSections,
       hideEmptyCreatorFilteredGroup: (category, rowCount) =>
         this.sessionCreatorFilterActive && Boolean(category) && rowCount === 0,
@@ -562,9 +563,13 @@ export class AppSidebarSessionNavigationElement extends AppSidebarBase {
   }
 
   knownSessionGroups(): string[] {
+    const storedGroups = this.context?.sessions.state.groups ?? [];
+    const serverCatalog = this.sessionData.sessionCategoryCatalog;
+    const knownGroups = [...new Set([...storedGroups, ...serverCatalog])];
     return collectKnownSidebarSessionGroups(
-      this.context?.sessions.state.groups ?? [],
+      knownGroups,
       this.sessionData.sessionsResult?.sessions ?? [],
+      this.sessionData.catalogLoaded,
     );
   }
 
