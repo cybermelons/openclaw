@@ -59,7 +59,10 @@ describe("preserveRosterPresentationMetadata", () => {
   });
 });
 
-test("sessions.changed removes a label when the event carries null", () => {
+test("sessions.changed keeps a label when a null arrives (label is not a tombstone)", () => {
+  // label/displayName are not on the shared tombstone list, so an incoming null
+  // can never delete them (issue #105). The real builder never sends null for
+  // these; a stray null must be ignored, not treated as a clear.
   const result: SessionsListResult = {
     ts: 1,
     path: "",
@@ -82,11 +85,11 @@ test("sessions.changed removes a label when the event carries null", () => {
     updatedAt: 2,
     label: null,
     displayName: null,
-  });
+  } as never);
 
   expect(reconciled.applied).toBe(true);
-  expect(reconciled.result?.sessions[0]?.label).toBeUndefined();
-  expect(reconciled.result?.sessions[0]?.displayName).toBeUndefined();
+  expect(reconciled.result?.sessions[0]?.label).toBe("Named session");
+  expect(reconciled.result?.sessions[0]?.displayName).toBe("Named session");
 });
 
 test("reconciling the same sessions.changed twice keeps result identity on the second pass", () => {
@@ -116,9 +119,10 @@ test("reconciling the same sessions.changed twice keeps result identity on the s
   expect(second.result).toBe(first.result);
 });
 
-test("sessions.changed deletes every null-tombstoned field, not a hand-kept list", () => {
-  // The gateway tombstones more fields than the old per-field cascade knew
-  // about; these five leaked literal null into rows typed optional-not-null.
+test("sessions.changed ignores a null on a non-tombstone field (no delete drift)", () => {
+  // These five fields used to leak literal null and get deleted by the old
+  // hand-kept exempt loop. They are not on the shared tombstone list, so a null
+  // must now be ignored and the prior value kept (issue #105 class-fix).
   const result: SessionsListResult = {
     ts: 1,
     path: "",
@@ -150,16 +154,49 @@ test("sessions.changed deletes every null-tombstoned field, not a hand-kept list
 
   expect(reconciled.applied).toBe(true);
   const row = reconciled.result?.sessions[0] as Record<string, unknown> | undefined;
-  for (const field of [
-    "toolOverrides",
-    "observerDigest",
-    "controlOwnerSessionKey",
-    "restartRecoveryStatus",
-    "goal",
-  ]) {
+  // Prior values survive; a null on a non-tombstone field is not a delete signal.
+  expect(row?.toolOverrides).toEqual({ profile: "coding" });
+  expect(row?.controlOwnerSessionKey).toBe("agent:main:owner");
+  expect(row?.restartRecoveryStatus).toBe("pending");
+  expect(row?.goal).toBe("ship it");
+  expect(row?.updatedAt).toBe(2);
+});
+
+test("sessions.changed clears each shared-list tombstone field on a null", () => {
+  // The 4 intentional tombstones must still clear on a genuine null.
+  const result: SessionsListResult = {
+    ts: 1,
+    path: "",
+    count: 1,
+    defaults: { modelProvider: null, model: null, contextTokens: null },
+    sessions: [
+      {
+        key: "agent:main:main",
+        kind: "direct",
+        updatedAt: 1,
+        category: "Gita",
+        thinkingLevel: "high",
+        lastRunError: "boom",
+        hasAutomation: true,
+      } as never,
+    ],
+  };
+
+  const reconciled = reconcileSessionChanged(result, {
+    sessionKey: "agent:main:main",
+    reason: "patch",
+    updatedAt: 2,
+    category: null,
+    thinkingLevel: null,
+    lastRunError: null,
+    hasAutomation: null,
+  } as never);
+
+  expect(reconciled.applied).toBe(true);
+  const row = reconciled.result?.sessions[0] as Record<string, unknown> | undefined;
+  for (const field of ["category", "thinkingLevel", "lastRunError", "hasAutomation"]) {
     expect(row?.[field], field).toBeUndefined();
   }
-  // updatedAt stays legitimately nullable and must not be deleted by the loop.
   expect(row?.updatedAt).toBe(2);
 });
 
@@ -473,7 +510,12 @@ describe("reconcileSessionChanged", () => {
     ]);
   });
 
-  it("clears archive attribution when an unarchive event arrives", () => {
+  it("applies the archived=false flag on an unarchive event", () => {
+    // archivedBy/archivedAt are not tombstone fields (issue #105): the builder
+    // omits them when undefined, and reconcile keeps any prior value. The UI
+    // gates archive attribution on the archived flag and the archived status
+    // filter, so a lingering archivedBy behind archived=false is never rendered.
+    // What must reconcile is the archived flag itself.
     const key = "agent:main:thread";
     const result = buildResult([
       {
@@ -496,14 +538,12 @@ describe("reconcileSessionChanged", () => {
         updatedAt: 2,
         sessionId: "s1",
         archived: false,
-        archivedAt: null,
-        archivedBy: null,
       },
       { archivedFilter: "all" },
     );
 
-    expect(next.row?.archivedBy).toBeUndefined();
-    expect(next.result?.sessions[0]?.archivedBy).toBeUndefined();
+    expect(next.row?.archived).toBe(false);
+    expect(next.result?.sessions[0]?.archived).toBe(false);
   });
 });
 

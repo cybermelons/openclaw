@@ -39,11 +39,19 @@ export function buildGatewaySessionEventFields(params: {
 }): Record<string, unknown> {
   const { sessionRow } = params;
   const omitUnscopedGlobalGoal = sessionRow.key === "global" && !params.agentId;
-  return {
+  // Build the projected patch, then strip every `undefined` key below. Omission
+  // means "no information" — the client keeps its prior value (issue #105). A
+  // field must never serialize `undefined` to `null`: a `null` reaches the wire
+  // only for a genuine clear, and the client honors `null` as a delete signal
+  // only for the shared SESSION_EVENT_TOMBSTONE_FIELDS list. Non-null defaults
+  // (`?? []`, `?? 0`, `?? false`) are safe: they produce a value, not a tombstone.
+  const fields: Record<string, unknown> = {
+    // updatedAt is legitimately nullable, but a null carries no update, so keep
+    // the prior behavior of omitting it (a null becomes undefined, then stripped).
     updatedAt: sessionRow.updatedAt ?? undefined,
     sessionId: sessionRow.sessionId,
-    createdActor: sessionRow.createdActor ?? null,
-    owner: sessionRow.owner ?? null,
+    createdActor: sessionRow.createdActor,
+    owner: sessionRow.owner,
     participants: sessionRow.participants ?? [],
     participantCount: sessionRow.participantCount ?? 0,
     kind: sessionRow.kind,
@@ -55,25 +63,21 @@ export function buildGatewaySessionEventFields(params: {
     chatType: sessionRow.chatType,
     origin: sessionRow.origin,
     archived: sessionRow.archived ?? false,
-    archivedAt: sessionRow.archivedAt ?? null,
-    archivedBy: sessionRow.archivedBy ?? null,
+    archivedAt: sessionRow.archivedAt,
+    archivedBy: sessionRow.archivedBy,
     pinned: sessionRow.pinned ?? false,
-    pinnedAt: sessionRow.pinnedAt ?? null,
+    pinnedAt: sessionRow.pinnedAt,
     unread: sessionRow.unread ?? false,
     lastReadAt: sessionRow.lastReadAt,
-    agentStatus: sessionRow.agentStatus ?? null,
-    ...(sessionRow.observerDigest === undefined
-      ? {}
-      : { observerDigest: sessionRow.observerDigest }),
+    agentStatus: sessionRow.agentStatus,
+    observerDigest: sessionRow.observerDigest,
     lastActivityAt: sessionRow.lastActivityAt,
     spawnedBy: sessionRow.spawnedBy,
-    ...(sessionRow.controlOwnerSessionKey === undefined
-      ? {}
-      : { controlOwnerSessionKey: sessionRow.controlOwnerSessionKey }),
+    controlOwnerSessionKey: sessionRow.controlOwnerSessionKey,
     swarmGroupId: sessionRow.swarmGroupId,
     spawnedWorkspaceDir: sessionRow.spawnedWorkspaceDir,
     spawnedCwd: sessionRow.spawnedCwd,
-    permissionMode: sessionRow.permissionMode ?? null,
+    permissionMode: sessionRow.permissionMode,
     ...(sessionRow.permissionMode !== undefined && sessionRow.sessionRoot !== undefined
       ? { sessionRoot: sessionRow.sessionRoot }
       : {}),
@@ -85,28 +89,25 @@ export function buildGatewaySessionEventFields(params: {
     createdAt: sessionRow.createdAt,
     forkSource: sessionRow.forkSource,
     previousSessionId: sessionRow.previousSessionId,
-    label: params.label ?? sessionRow.label ?? null,
-    icon: sessionRow.icon ?? null,
-    // Explicit null so subscribed clients drop a cleared category during merge-reconcile.
-    // Omitted (not null) when undefined, so an absent field doesn't get read as a clear.
-    ...(sessionRow.category === undefined ? {} : { category: sessionRow.category }),
-    displayName: params.displayName ?? sessionRow.displayName ?? null,
+    label: params.label ?? sessionRow.label,
+    icon: sessionRow.icon,
+    // Tombstone field: an explicit null clears a set category on the client.
+    category: sessionRow.category,
+    displayName: params.displayName ?? sessionRow.displayName,
     deliveryContext: sessionRow.deliveryContext,
     parentSessionKey: params.parentSessionKey ?? sessionRow.parentSessionKey,
     childSessions: sessionRow.childSessions,
-    // Explicit null lets subscribed clients clear an override during merge-reconcile.
-    thinkingLevel: sessionRow.thinkingLevel ?? null,
+    // Tombstone field: an explicit null clears a thinking-level override.
+    thinkingLevel: sessionRow.thinkingLevel,
     fastMode: sessionRow.fastMode,
-    ...(sessionRow.toolOverrides === undefined ? {} : { toolOverrides: sessionRow.toolOverrides }),
+    toolOverrides: sessionRow.toolOverrides,
     verboseLevel: sessionRow.verboseLevel,
     reasoningLevel: sessionRow.reasoningLevel,
     elevatedLevel: sessionRow.elevatedLevel,
     sendPolicy: sessionRow.sendPolicy,
     systemSent: sessionRow.systemSent,
     abortedLastRun: sessionRow.abortedLastRun,
-    ...(sessionRow.restartRecoveryStatus === undefined
-      ? {}
-      : { restartRecoveryStatus: sessionRow.restartRecoveryStatus }),
+    restartRecoveryStatus: sessionRow.restartRecoveryStatus,
     inputTokens: sessionRow.inputTokens,
     outputTokens: sessionRow.outputTokens,
     lastChannel: sessionRow.lastChannel,
@@ -115,9 +116,7 @@ export function buildGatewaySessionEventFields(params: {
     lastThreadId: sessionRow.lastThreadId,
     totalTokens: sessionRow.totalTokens,
     totalTokensFresh: sessionRow.totalTokensFresh,
-    ...(omitUnscopedGlobalGoal || sessionRow.goal === undefined
-      ? {}
-      : { goal: sessionRow.goal }),
+    goal: omitUnscopedGlobalGoal ? undefined : sessionRow.goal,
     contextTokens: sessionRow.contextTokens,
     estimatedCostUsd: sessionRow.estimatedCostUsd,
     responseUsage: sessionRow.responseUsage,
@@ -126,9 +125,9 @@ export function buildGatewaySessionEventFields(params: {
     model: sessionRow.model,
     agentRuntime: sessionRow.agentRuntime,
     status: sessionRow.status,
-    // Explicit null lets subscribed clients clear the previous run's failure reason.
-    lastRunError: sessionRow.lastRunError ?? null,
-    // Explicit false lets subscribed clients drop the flag during merge-reconcile.
+    // Tombstone field: an explicit null clears the previous run's failure reason.
+    lastRunError: sessionRow.lastRunError,
+    // Tombstone field: `?? false` drops the flag; a genuine null also clears it.
     hasAutomation: sessionRow.hasAutomation ?? false,
     ...(params.hasActiveRun === undefined ? {} : { hasActiveRun: params.hasActiveRun }),
     ...(params.activeRunIds === undefined ? {} : { activeRunIds: params.activeRunIds }),
@@ -138,4 +137,13 @@ export function buildGatewaySessionEventFields(params: {
     compactionCheckpointCount: sessionRow.compactionCheckpointCount,
     latestCompactionCheckpoint: sessionRow.latestCompactionCheckpoint,
   };
+  // Partial-patch invariant: drop every undefined key so an absent source value
+  // is absent on the wire, never a null tombstone. A null survives only for a
+  // genuine clear (honored by the client for tombstone fields only).
+  for (const key of Object.keys(fields)) {
+    if (fields[key] === undefined) {
+      delete fields[key];
+    }
+  }
+  return fields;
 }

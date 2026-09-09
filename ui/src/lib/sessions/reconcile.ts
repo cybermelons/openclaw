@@ -1,3 +1,4 @@
+import { isSessionEventTombstoneField } from "@openclaw/gateway-protocol";
 import { asNullableRecord as recordOrNull } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString as stringValue } from "@openclaw/normalization-core/string-coerce";
 import type { GatewaySessionRow, SessionRunStatus, SessionsListResult } from "../../api/types.ts";
@@ -448,23 +449,38 @@ export function reconcileSessionChanged(
     existing && !thinkingMetadataIdentityMatches(incomingThinkingIdentity, existing)
       ? stripThinkingMetadata(existing)
       : existing;
+  // The gateway emits an explicit null only for a field on the shared tombstone
+  // list (SESSION_EVENT_TOMBSTONE_FIELDS in @openclaw/gateway-protocol) — the
+  // single source of truth used by both the payload builder and this reconcile.
+  // A field not on that list can never be a delete signal, so a new nullable
+  // field is safe by default. A stray null on a non-tombstone field must not
+  // overwrite the prior value, so drop it before the merge; the builder already
+  // omits undefined fields, so an absent field never reaches here at all.
+  // updatedAt/activeLeafEntryId are not tombstones and keep their own explicit
+  // handling below, so let their null pass through the filter.
+  const mergeFields: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(rowFields)) {
+    if (
+      value === null &&
+      !isSessionEventTombstoneField(field) &&
+      field !== "updatedAt" &&
+      field !== "activeLeafEntryId"
+    ) {
+      continue;
+    }
+    mergeFields[field] = value;
+  }
   const row = {
     ...existingFields,
-    ...rowFields,
+    ...mergeFields,
     key: existing?.key ?? key,
     kind,
     updatedAt: updatedAt ?? null,
     ...(sessionId ? { sessionId } : {}),
   } as GatewaySessionRow;
-  // The gateway emits explicit null tombstones so subscribed clients clear
-  // fields during merge-reconcile (session-event-payload.ts). Row fields are
-  // typed optional-not-null, so every null tombstone deletes — a hand-kept
-  // field list here drifts as new tombstoned fields ship (it already had:
-  // toolOverrides/observerDigest/controlOwnerSessionKey/restartRecoveryStatus/
-  // goal leaked null). updatedAt/activeLeafEntryId are the schema's only
-  // legitimately nullable row fields and keep their explicit handling.
-  for (const [field, value] of Object.entries(rowFields)) {
-    if (value === null && field !== "updatedAt" && field !== "activeLeafEntryId") {
+  // A tombstone field's null is an intentional clear: remove it from the merged row.
+  for (const [field, value] of Object.entries(mergeFields)) {
+    if (value === null && isSessionEventTombstoneField(field)) {
       delete row[field as keyof GatewaySessionRow];
     }
   }

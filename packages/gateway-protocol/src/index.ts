@@ -694,3 +694,8 @@ export {
 } from "./version.js";
 export type * from "./schema-types.js";
 export type { SessionsPatchResult } from "./sessions-patch-result.js";
+export {
+  SESSION_EVENT_TOMBSTONE_FIELDS,
+  isSessionEventTombstoneField,
+} from "./session-event-tombstones.js";
+export type { SessionEventTombstoneField } from "./session-event-tombstones.js";
