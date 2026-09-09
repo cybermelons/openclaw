@@ -342,7 +342,10 @@ describe("gateway session utils", () => {
     );
   });
 
-  test("emits a tombstone when a session has no current control owner", () => {
+  test("omits controlOwnerSessionKey when a session has no current control owner", () => {
+    // controlOwnerSessionKey is not on the shared tombstone list (issue #105):
+    // an absent control owner is omitted, never serialized as a null delete
+    // signal. It used to leak null through the `?? null` path.
     const row = buildGatewaySessionRow({
       cfg: createModelDefaultsConfig({ primary: "openai/gpt-5.4" }),
       storePath: "",
@@ -351,7 +354,9 @@ describe("gateway session utils", () => {
       entry: {} as SessionEntry,
     });
 
-    expect(buildGatewaySessionEventFields({ sessionRow: row }).controlOwnerSessionKey).toBeNull();
+    expect(buildGatewaySessionEventFields({ sessionRow: row })).not.toHaveProperty(
+      "controlOwnerSessionKey",
+    );
   });
 
   test("projects only unexpired agent status", () => {
@@ -426,7 +431,11 @@ describe("gateway session utils", () => {
     });
 
     expect(row.observerDigest).toBeUndefined();
-    expect(buildGatewaySessionEventFields({ sessionRow: row }).observerDigest).toBeNull();
+    // observerDigest is not on the shared tombstone list (issue #105): an absent
+    // digest is omitted from the event, never a null delete signal.
+    expect(buildGatewaySessionEventFields({ sessionRow: row })).not.toHaveProperty(
+      "observerDigest",
+    );
   });
 
   test("session lists apply a bounded default and expose truncation metadata", async () => {
@@ -806,8 +815,20 @@ describe("gateway session utils", () => {
       "Provider credits exhausted",
     );
 
-    const cleared = { ...failed, status: "running" as const, lastRunError: undefined };
-    expect(buildGatewaySessionEventFields({ sessionRow: cleared }).lastRunError).toBeNull();
+    // lastRunError is a tombstone field, but a clear is signaled by a genuine
+    // null, not by undefined (issue #105). The production clear path in
+    // server-chat.ts sets lastRunError to null explicitly; the builder passes a
+    // null through as a real clear and omits an undefined (no information).
+    const clearedNull = { ...failed, status: "running" as const, lastRunError: null };
+    expect(buildGatewaySessionEventFields({ sessionRow: clearedNull })).toHaveProperty(
+      "lastRunError",
+    );
+    expect(buildGatewaySessionEventFields({ sessionRow: clearedNull }).lastRunError).toBeNull();
+
+    const clearedUndefined = { ...failed, status: "running" as const, lastRunError: undefined };
+    expect(buildGatewaySessionEventFields({ sessionRow: clearedUndefined })).not.toHaveProperty(
+      "lastRunError",
+    );
   });
 
   test("session rows ignore malformed compaction checkpoints", () => {
