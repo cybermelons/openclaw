@@ -49,3 +49,16 @@ describe("listSqliteLiveSessionCategories", () => {
     });
   });
 });
+
+describe("listSqliteLiveSessionCategories scope handling", () => {
+  it("throws when no agent id can be resolved (regression: #112 crashed sessions.list)", () => {
+    // buildSessionsListResult used to call this with no scope at all. With no
+    // agentId and no storePath, resolveSqliteScope cannot pick a database and
+    // throws, which failed the whole sessions.list handler and, once it escaped
+    // as an uncaught exception, killed the gateway. The caller must pass the
+    // agent id it already has, and must not let a failure here propagate.
+    expect(() => listSqliteLiveSessionCategories({})).toThrow(
+      /Cannot resolve SQLite session scope without an agent id/,
+    );
+  });
+});

@@ -460,6 +460,23 @@ function prepareSessionList(params: ListSessionsFromStoreParams) {
   };
 }
 
+/**
+ * The catalog is an enrichment: sessions.list must still succeed without it.
+ *
+ * On failure return undefined, never []. Per SessionsListResult, a present
+ * `categories` is authoritative ("absence of a name means no live rows exist
+ * for it"), so [] would tell the client every category is empty and re-create
+ * the #112 vanishing-section bug. An omitted field means "no change", which
+ * leaves the client's existing catalog and its row-scan fallback intact.
+ */
+function listLiveSessionCategoriesSafe(agentId?: string): string[] | undefined {
+  try {
+    return listSqliteLiveSessionCategories(agentId ? { agentId } : {});
+  } catch {
+    return undefined;
+  }
+}
+
 function buildSessionsListResult(params: {
   cfg: OpenClawConfig;
   agentId?: string;
@@ -478,7 +495,7 @@ function buildSessionsListResult(params: {
     nextOffset: list.nextOffset,
     hasMore: list.hasMore,
     creators: list.creators,
-    categories: listSqliteLiveSessionCategories(),
+    categories: listLiveSessionCategoriesSafe(params.agentId),
     defaults: getSessionDefaults(params.cfg, params.modelCatalog, {
       ...(params.agentId ? { agentId: params.agentId } : {}),
       allowPluginNormalization: false,
