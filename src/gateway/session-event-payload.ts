@@ -62,10 +62,14 @@ export function buildGatewaySessionEventFields(params: {
     unread: sessionRow.unread ?? false,
     lastReadAt: sessionRow.lastReadAt,
     agentStatus: sessionRow.agentStatus ?? null,
-    observerDigest: sessionRow.observerDigest ?? null,
+    ...(sessionRow.observerDigest === undefined
+      ? {}
+      : { observerDigest: sessionRow.observerDigest }),
     lastActivityAt: sessionRow.lastActivityAt,
     spawnedBy: sessionRow.spawnedBy,
-    controlOwnerSessionKey: sessionRow.controlOwnerSessionKey ?? null,
+    ...(sessionRow.controlOwnerSessionKey === undefined
+      ? {}
+      : { controlOwnerSessionKey: sessionRow.controlOwnerSessionKey }),
     swarmGroupId: sessionRow.swarmGroupId,
     spawnedWorkspaceDir: sessionRow.spawnedWorkspaceDir,
     spawnedCwd: sessionRow.spawnedCwd,
@@ -84,7 +88,8 @@ export function buildGatewaySessionEventFields(params: {
     label: params.label ?? sessionRow.label ?? null,
     icon: sessionRow.icon ?? null,
     // Explicit null so subscribed clients drop a cleared category during merge-reconcile.
-    category: sessionRow.category ?? null,
+    // Omitted (not null) when undefined, so an absent field doesn't get read as a clear.
+    ...(sessionRow.category === undefined ? {} : { category: sessionRow.category }),
     displayName: params.displayName ?? sessionRow.displayName ?? null,
     deliveryContext: sessionRow.deliveryContext,
     parentSessionKey: params.parentSessionKey ?? sessionRow.parentSessionKey,
@@ -92,14 +97,16 @@ export function buildGatewaySessionEventFields(params: {
     // Explicit null lets subscribed clients clear an override during merge-reconcile.
     thinkingLevel: sessionRow.thinkingLevel ?? null,
     fastMode: sessionRow.fastMode,
-    toolOverrides: sessionRow.toolOverrides ?? null,
+    ...(sessionRow.toolOverrides === undefined ? {} : { toolOverrides: sessionRow.toolOverrides }),
     verboseLevel: sessionRow.verboseLevel,
     reasoningLevel: sessionRow.reasoningLevel,
     elevatedLevel: sessionRow.elevatedLevel,
     sendPolicy: sessionRow.sendPolicy,
     systemSent: sessionRow.systemSent,
     abortedLastRun: sessionRow.abortedLastRun,
-    restartRecoveryStatus: sessionRow.restartRecoveryStatus ?? null,
+    ...(sessionRow.restartRecoveryStatus === undefined
+      ? {}
+      : { restartRecoveryStatus: sessionRow.restartRecoveryStatus }),
     inputTokens: sessionRow.inputTokens,
     outputTokens: sessionRow.outputTokens,
     lastChannel: sessionRow.lastChannel,
@@ -108,7 +115,9 @@ export function buildGatewaySessionEventFields(params: {
     lastThreadId: sessionRow.lastThreadId,
     totalTokens: sessionRow.totalTokens,
     totalTokensFresh: sessionRow.totalTokensFresh,
-    ...(omitUnscopedGlobalGoal ? {} : { goal: sessionRow.goal ?? null }),
+    ...(omitUnscopedGlobalGoal || sessionRow.goal === undefined
+      ? {}
+      : { goal: sessionRow.goal }),
     contextTokens: sessionRow.contextTokens,
     estimatedCostUsd: sessionRow.estimatedCostUsd,
     responseUsage: sessionRow.responseUsage,
