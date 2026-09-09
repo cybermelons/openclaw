@@ -139,6 +139,37 @@ describe("subagent registry sqlite store", () => {
     });
   });
 
+  it("persists the resolved claude -p transcript path in its own typed column", async () => {
+    await withTempStateEnv(async () => {
+      const transcriptPath =
+        "/home/kiri/.claude/projects/-home-kiri--openclaw-workspace/session-one.jsonl";
+      const run = createRun({
+        execution: {
+          status: "terminal",
+          startedAt: 110,
+          endedAt: 250,
+          outcome: { status: "ok", startedAt: 110, endedAt: 250, elapsedMs: 140 },
+          transcriptPath,
+        },
+      });
+
+      saveSubagentRegistryToSqlite(new Map([[run.runId, run]]));
+
+      const restored = loadSubagentRegistryFromSqlite().get(run.runId);
+      expect(restored?.execution.transcriptPath).toBe(transcriptPath);
+
+      const { db } = openOpenClawStateDatabase();
+      const row = executeSqliteQuerySync(
+        db,
+        getNodeSqliteKysely<SubagentRegistryDatabase>(db)
+          .selectFrom("subagent_runs")
+          .select("transcript_path")
+          .where("run_id", "=", run.runId),
+      ).rows[0];
+      expect(row?.transcript_path).toBe(transcriptPath);
+    });
+  });
+
   it.each([
     {
       name: "visible",

@@ -874,4 +874,41 @@ describe("session state events", () => {
       payload: { outcome: "cancelled" },
     });
   });
+
+  it("carries a non-null payload on every terminal event, including bare ok completions", () => {
+    const database = createDatabaseOptions();
+    recordSubagentTerminalState({
+      childSessionKey: child,
+      runId: "run-with-transcript",
+      requesterSessionKey: watcher,
+      outcomeStatus: "ok",
+      transcriptPath: "/home/kiri/.claude/projects/-home-kiri--openclaw-workspace/x.jsonl",
+      resultText: "final assistant text",
+    });
+    recordSubagentTerminalState({
+      childSessionKey: child,
+      runId: "run-without-transcript",
+      requesterSessionKey: watcher,
+      outcomeStatus: "ok",
+    });
+
+    const { db } = openOpenClawStateDatabase(database);
+    const rows = db
+      .prepare(
+        "SELECT run_id, payload_json FROM session_state_events WHERE run_id IN (?, ?) ORDER BY sequence ASC",
+      )
+      .all("run-with-transcript", "run-without-transcript") as Array<{
+      run_id: string;
+      payload_json: string | null;
+    }>;
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.payload_json).not.toBeNull();
+    }
+    expect(JSON.parse(rows[0]!.payload_json!)).toEqual({
+      transcriptPath: "/home/kiri/.claude/projects/-home-kiri--openclaw-workspace/x.jsonl",
+      resultText: "final assistant text",
+    });
+    expect(JSON.parse(rows[1]!.payload_json!)).toEqual({});
+  });
 });

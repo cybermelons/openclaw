@@ -1062,10 +1062,15 @@ export function recordSubagentTerminalState(params: {
   runId: string;
   requesterSessionKey: string;
   outcomeStatus: SubagentTerminalStatus;
+  transcriptPath?: string;
+  resultText?: string | null;
 }): void {
   // Non-ok statuses share kind run_failed: the closed kind union mirrors the sibling
   // SubagentRunOutcome status projection, which also folds cancel/timeout into error
   // status. The precise outcome survives in payload for changesSince consumers.
+  // Every terminal event carries a payload: a durable transcript pointer (and the
+  // final assistant text when already in hand) so a failed announce never strands
+  // an intact record with no way to find it back.
   recordSessionStateEvent({
     sessionKey: params.childSessionKey,
     agentId: resolveAgentIdFromSessionKey(params.childSessionKey),
@@ -1074,7 +1079,11 @@ export function recordSubagentTerminalState(params: {
     runId: params.runId,
     dedupeKey: `run-terminal:${params.runId}`,
     summary: SUBAGENT_TERMINAL_SUMMARY[params.outcomeStatus],
-    ...(params.outcomeStatus === "ok" ? {} : { payload: { outcome: params.outcomeStatus } }),
+    payload: {
+      ...(params.outcomeStatus === "ok" ? {} : { outcome: params.outcomeStatus }),
+      ...(params.transcriptPath ? { transcriptPath: params.transcriptPath } : {}),
+      ...(params.resultText ? { resultText: params.resultText } : {}),
+    },
     watcherSessionKeys: [params.requesterSessionKey],
   });
 }

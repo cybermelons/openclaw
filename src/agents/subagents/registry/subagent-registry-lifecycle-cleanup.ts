@@ -24,6 +24,7 @@ import {
   MIN_ANNOUNCE_RETRY_DELAY_MS,
   persistSubagentSessionTiming,
   resolveAnnounceRetryDelayMs,
+  resolveSubagentTranscriptPath,
 } from "./subagent-registry-helpers.js";
 import type {
   SubagentLifecycleCommonContext,
@@ -353,11 +354,28 @@ export async function completeTerminalEffects(
     outcomeStatus &&
     outcomeStatus !== "unknown"
   ) {
+    if (!entry.execution.transcriptPath) {
+      const transcriptPath = resolveSubagentTranscriptPath(entry.childSessionKey);
+      if (transcriptPath) {
+        entry.execution = { ...entry.execution, transcriptPath };
+        try {
+          params.persistOrThrow(completeParams.runId);
+        } catch (error) {
+          params.warn("failed to persist subagent transcript path", {
+            err: error,
+            runId: entry.runId,
+            childSessionKey: entry.childSessionKey,
+          });
+        }
+      }
+    }
     recordSubagentTerminalState({
       childSessionKey: entry.childSessionKey,
       runId: entry.runId,
       requesterSessionKey: entry.requesterSessionKey,
       outcomeStatus,
+      transcriptPath: entry.execution.transcriptPath,
+      resultText: entry.completion?.resultText,
     });
   }
 
