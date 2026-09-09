@@ -90,6 +90,8 @@ type SubagentExecutionState = {
   interruptedAt?: number;
   interruptionReason?: "gateway-restart";
   transcriptTarget?: AgentRunSessionTarget;
+  /** Durable jsonl transcript path for the child's `claude -p` process, once resolved. */
+  transcriptPath?: string;
 };
 
 export type SubagentCompletionState = {

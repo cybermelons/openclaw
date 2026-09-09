@@ -1414,6 +1414,7 @@ export interface SubagentRuns {
   swarm_usage_json: string | null;
   task: string;
   task_name: string | null;
+  transcript_path: string | null;
   wake_on_descendant_settle: number | null;
   workspace_dir: string | null;
 }

@@ -185,6 +185,7 @@ export function bindSubagentRunRecord(entry: SubagentRunRecord): BoundSubagentRu
     swarm_schema_error: normalized.collectorCompletion?.schemaError ?? null,
     swarm_usage_json: jsonStringify(normalized.collectorCompletion?.usage),
     payload_json: JSON.stringify(normalized),
+    transcript_path: normalized.execution.transcriptPath ?? null,
   };
 }
 

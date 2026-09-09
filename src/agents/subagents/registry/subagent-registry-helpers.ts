@@ -12,8 +12,16 @@ import {
   resolveAgentIdFromSessionKey,
   resolveSessionStorePathCore,
 } from "../../../config/sessions.js";
-import { patchSessionEntryCore } from "../../../config/sessions/session-accessor.js";
+import { getCliSessionBinding } from "../../../config/sessions/cli-session-binding.js";
+import {
+  loadSessionEntryReadOnly,
+  patchSessionEntryCore,
+} from "../../../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
+import {
+  CLAUDE_CLI_PROVIDER,
+  resolveClaudeCliSessionFilePath,
+} from "../../../gateway/cli-session-history.claude.js";
 import { computeBackoff } from "../../../infra/backoff.js";
 import { defaultRuntime } from "../../../runtime.js";
 import { truncateUtf8Prefix } from "../../../utils/utf8-truncate.js";
@@ -64,6 +72,22 @@ export function capFrozenResultText(resultText: string): string {
   );
   const payload = truncateUtf8Prefix(trimmed, maxPayloadBytes);
   return `${payload}${notice}`;
+}
+
+/**
+ * Resolves the durable `claude -p` jsonl transcript for a child session, using
+ * the CLI session id already bound to it by the normal run-completion path.
+ * Best-effort: an unbound or not-yet-flushed session leaves the run row
+ * without a transcript pointer rather than failing terminal completion.
+ */
+export function resolveSubagentTranscriptPath(childSessionKey: string): string | undefined {
+  try {
+    const entry = loadSessionEntryReadOnly({ sessionKey: childSessionKey, clone: false });
+    const cliSessionId = getCliSessionBinding(entry, CLAUDE_CLI_PROVIDER)?.sessionId;
+    return cliSessionId ? resolveClaudeCliSessionFilePath({ cliSessionId }) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Computes bounded exponential backoff for subagent announce retries. */
