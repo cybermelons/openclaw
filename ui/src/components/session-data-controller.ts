@@ -59,6 +59,15 @@ export class SessionDataController implements ReactiveController, SessionCatalog
   loadingMoreSessionCatalogIds: ReadonlySet<string> = new Set();
   visibleSessionLimits = new Map<string, number>();
   sessionsResult: SessionsListResult | null = null;
+  /**
+   * Server-authoritative category catalog (distinct categories with at
+   * least one live session row), independent of the 100-row list cap.
+   * `catalogLoaded` stays false until the first payload carrying a
+   * `categories` field arrives; a `sessions.changed` event without that
+   * field means "no change" and must never clear this list.
+   */
+  sessionCategoryCatalog: readonly string[] = [];
+  catalogLoaded = false;
   sessionsAgentId: string | null = null;
   sessionsLoading = false;
   childSessionRowsByParent: Readonly<Record<string, readonly GatewaySessionRow[]>> = {};

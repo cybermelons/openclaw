@@ -1,4 +1,5 @@
 // Shared sessions.changed broadcaster for gateway RPC and chat-command mutations.
+import { listSqliteLiveSessionCategories } from "../../config/sessions/session-accessor.sqlite-categories.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { hasSessionChangeReceivers } from "../session-change-receivers.js";
 import { buildGatewaySessionEventFields } from "../session-event-payload.js";
@@ -37,6 +38,29 @@ const SESSIONS_CHANGED_MAX_WAIT_MS = 500;
 const sessionsMutationVersions = new WeakMap<object, number>();
 const pendingChangesByContext = new WeakMap<object, Map<string, PendingSessionChange>>();
 const pendingSessionChanges = new Set<PendingSessionChange>();
+// Last catalog emitted per context, held as a sorted-join for cheap comparison.
+// A mutation recomputes the catalog and includes it on the event only when it
+// changed; an unchanged catalog is omitted, never sent as an empty array.
+const lastEmittedCategoriesByContext = new WeakMap<object, string>();
+
+function categoriesJoinKey(categories: string[]): string {
+  return categories.join("\u0000");
+}
+
+/**
+ * Recompute the live category catalog and return it only if it differs from
+ * the last catalog emitted for this context. Held in module state per the
+ * design: "do not maintain incremental counters, they invite drift."
+ */
+function computeChangedCategories(context: object): string[] | undefined {
+  const categories = listSqliteLiveSessionCategories();
+  const joined = categoriesJoinKey(categories);
+  if (lastEmittedCategoriesByContext.get(context) === joined) {
+    return undefined;
+  }
+  lastEmittedCategoriesByContext.set(context, joined);
+  return categories;
+}
 
 export function readSessionsMutationVersion(context: object): number {
   return sessionsMutationVersions.get(context) ?? 0;
@@ -85,12 +109,14 @@ function broadcastSessionsChanged(
           defaultAgentId: unscopedOwnerAgentId,
         })
       : null;
+  const changedCategories = computeChangedCategories(context);
   context.broadcastToConnIds(
     "sessions.changed",
     {
       ...payload,
       ...(effectiveAgentId ? { agentId: effectiveAgentId } : {}),
       ts: Date.now(),
+      ...(changedCategories === undefined ? {} : { categories: changedCategories }),
       ...(sessionRow
         ? {
             ...buildGatewaySessionEventFields({

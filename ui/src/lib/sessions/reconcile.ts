@@ -362,6 +362,42 @@ export function readSessionChangedEvent(payload: unknown): SessionChangedEventIn
   };
 }
 
+/**
+ * Reads the top-level `categories` field carried on a `sessions.changed`
+ * event payload. The gateway attaches this field only when the category
+ * catalog changed since the last emit; an event without it means "no
+ * change" and must never be read as "empty catalog" (see reconcile below).
+ */
+function readEventCategories(event: Record<string, unknown>): string[] | undefined {
+  const raw = event.categories;
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const categories: string[] = [];
+  for (const entry of raw) {
+    const value = stringValue(entry);
+    if (value !== undefined) {
+      categories.push(value);
+    }
+  }
+  return categories;
+}
+
+/** Applies an event's catalog field to a result, only when the event carried one. */
+function applyEventCategories(
+  result: SessionsListResult | null,
+  event: Record<string, unknown>,
+): SessionsListResult | null {
+  if (!result) {
+    return result;
+  }
+  const categories = readEventCategories(event);
+  if (categories === undefined) {
+    return result;
+  }
+  return { ...result, categories };
+}
+
 export function reconcileSessionChanged(
   result: SessionsListResult | null,
   payload: unknown,
@@ -395,18 +431,27 @@ export function reconcileSessionChanged(
 
   if (reason === "delete") {
     if (!existing) {
-      return { applied: true, result, key, agentId: parsed.agentId, deletedKey: key };
+      return {
+        applied: true,
+        result: applyEventCategories(result, event),
+        key,
+        agentId: parsed.agentId,
+        deletedKey: key,
+      };
     }
     const sessions = result.sessions.filter((candidate) => candidate !== existing);
     return {
       applied: true,
       key,
       agentId: parsed.agentId,
-      result: {
-        ...result,
-        count: sessions.length,
-        sessions,
-      },
+      result: applyEventCategories(
+        {
+          ...result,
+          count: sessions.length,
+          sessions,
+        },
+        event,
+      ),
       deletedKey: existing.key,
     };
   }
@@ -503,8 +548,11 @@ export function reconcileSessionChanged(
       existing?.owner?.assignedAt !== row.owner?.assignedAt);
   // The facet covers unloaded pages, so an ownership event invalidates it until
   // the session capability's canonical list refresh supplies a complete replacement.
-  const reconciledResult = ownershipChanged ? { ...timestamped, creators: undefined } : timestamped;
-  const reconciledRow = reconciledResult.sessions.find((candidate) =>
+  const reconciledResult = applyEventCategories(
+    ownershipChanged ? { ...timestamped, creators: undefined } : timestamped,
+    event,
+  );
+  const reconciledRow = reconciledResult?.sessions.find((candidate) =>
     matchesExistingSession(
       candidate,
       { key, kind: "global", updatedAt: null },

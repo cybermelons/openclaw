@@ -205,6 +205,39 @@ describe("groupSidebarSessionRows", () => {
       "work",
     ]);
   });
+
+  it("renders a catalog category with zero loaded rows as an empty section (issue #112)", () => {
+    // "Gita" is in the server catalog but its newest row sits outside the
+    // loaded window; the section must still appear, empty, rather than
+    // being omitted.
+    const sections = groupSidebarSessionRows(
+      [row({ key: "a-1", category: "Alpha" }), row({ key: "u-1" })],
+      { knownGroups: ["Alpha", "Gita"] },
+    );
+
+    expect(sections.map((section) => section.id)).toEqual([
+      "category:Alpha",
+      "category:Gita",
+      "ungrouped",
+      "work",
+    ]);
+    const gitaSection = sections.find((section) => section.id === "category:Gita");
+    expect(gitaSection?.rows).toEqual([]);
+  });
+
+  it("keeps a stored category token absent from knownGroups and loaded rows while catalog is still loading (issue #112 wire)", () => {
+    const rows = [row({ key: "a-1", category: "Alpha" }), row({ key: "u-1" })];
+    const options = {
+      knownGroups: ["Alpha"],
+      sectionOrder: ["category:Alpha", "category:Lagging", "ungrouped", "work"],
+    };
+
+    const loading = groupSidebarSessionRows(rows, { ...options, catalogLoaded: false });
+    expect(loading.map((section) => section.id)).toContain("category:Lagging");
+
+    const loaded = groupSidebarSessionRows(rows, { ...options, catalogLoaded: true });
+    expect(loaded.map((section) => section.id)).not.toContain("category:Lagging");
+  });
 });
 
 describe("normalizeSessionSectionOrder", () => {
@@ -271,6 +304,37 @@ describe("normalizeSessionSectionOrder", () => {
         ["Alpha", "Beta"],
       ),
     ).toEqual(["category:Alpha", "ungrouped", "groups", "category:Beta", "work"]);
+  });
+
+  it("does not drop a category:X token before the catalog has loaded (issue #112)", () => {
+    // Gita is not yet in knownGroups (no catalog, no loaded row scanned yet),
+    // but the stored token must survive so the section does not flicker out.
+    expect(
+      normalizeSessionSectionOrder(["category:Gita", "ungrouped", "groups", "work"], [], [], false),
+    ).toEqual(["category:Gita", "ungrouped", "groups", "work"]);
+  });
+
+  it("after the catalog loads, drops a category:X token only when absent from catalog, state.groups, and loaded rows", () => {
+    expect(
+      normalizeSessionSectionOrder(
+        ["category:Gita", "category:Stale", "ungrouped", "groups", "work"],
+        ["Gita"],
+        [],
+        true,
+        [],
+      ),
+    ).toEqual(["category:Gita", "ungrouped", "groups", "work"]);
+
+    // Still kept when only the loaded-row scan (not the catalog/groups) knows it.
+    expect(
+      normalizeSessionSectionOrder(
+        ["category:RowOnly", "ungrouped", "groups", "work"],
+        [],
+        [],
+        true,
+        ["RowOnly"],
+      ),
+    ).toEqual(["category:RowOnly", "ungrouped", "groups", "work"]);
   });
 });
 

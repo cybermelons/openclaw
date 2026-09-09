@@ -176,7 +176,12 @@ export async function reorderSidebarSection(
     const knownGroups = host.knownSessionGroups();
     const knownCatalogIds = host.knownSessionCatalogIds();
     const next = moveSessionSection(
-      normalizeSessionSectionOrder(host.knownSectionOrder(), knownGroups, knownCatalogIds),
+      normalizeSessionSectionOrder(
+        host.knownSectionOrder(),
+        knownGroups,
+        knownCatalogIds,
+        host.sessionData.catalogLoaded,
+      ),
       sourceSectionId,
       targetSectionId,
       position,

@@ -206,6 +206,10 @@ not to later bookkeeping writes. Use `openclaw doctor --session-sqlite inspect
 sequence](/cli/doctor#session-sqlite-migration) when you want explicit
 inspection or validation evidence.
 
+## Derived Views and Authoritative Facts
+
+A derived view must distinguish absent-from-cache from known-empty; only an authoritative complete fact may authorize deletion or omission. This rule applies across the codebase to any view built from a cache, a window, or a partial fetch. Three known instances of this bug class are: the session-event tombstone bug, where a `null` field was wrongly treated as "no value" instead of "clear"; the omitted-field-as-clear bug, where an absent field was wrongly treated as an instruction to clear a value; and the sidebar category bug (issue #112), where the client derived which category sections exist from a capped 100-row cache, so categories whose newest row fell outside the window vanished from the sidebar.
+
 ## Session maintenance
 
 OpenClaw bounds session storage over time via `session.maintenance`, defaults

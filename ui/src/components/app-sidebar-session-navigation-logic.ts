@@ -310,6 +310,7 @@ export function partitionSidebarVisibleSections(input: {
   grouping: SidebarSessionsGrouping;
   knownGroups: string[] | undefined;
   catalogIds?: readonly string[];
+  catalogLoaded?: boolean;
   sectionOrder?: readonly string[];
   collapsedSections: ReadonlySet<string>;
   hideEmptyCreatorFilteredGroup: (category: string | undefined, rowCount: number) => boolean;
@@ -322,6 +323,7 @@ export function partitionSidebarVisibleSections(input: {
     knownGroups: input.knownGroups,
     sectionOrder: input.sectionOrder,
     catalogIds: input.catalogIds,
+    catalogLoaded: input.catalogLoaded,
   }).filter(
     (section) =>
       section.id !== "pinned" &&
@@ -568,8 +570,17 @@ export function findSidebarMainSessionRow(
 export function collectKnownSidebarSessionGroups(
   catalog: readonly string[],
   rows: readonly GatewaySessionRow[],
+  serverCatalogLoaded = true,
 ): string[] {
   const catalogSet = new Set(catalog);
+  // Once the server catalog has loaded, it (unioned with stored groups) is
+  // authoritative for "which categories exist" — a row-derived category is
+  // already in `catalog` in that case. Before the catalog loads (old
+  // gateway, early race), fall back to scanning the loaded rows so no
+  // section is lost while waiting.
+  if (serverCatalogLoaded) {
+    return [...catalog];
+  }
   const discovered = rows
     .map((row) => normalizeOptionalString(row.category))
     .filter((name): name is string => typeof name === "string" && !catalogSet.has(name))

@@ -12,6 +12,7 @@ import {
 } from "../agents/subagents/registry/subagent-registry-read.js";
 import { shouldKeepSubagentRunChildLink } from "../agents/subagents/registry/subagent-run-liveness.js";
 import type { SessionEntry } from "../config/sessions.js";
+import { listSqliteLiveSessionCategories } from "../config/sessions/session-accessor.sqlite-categories.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { withPinnedActivePluginRegistryWorkspaceDir } from "../plugins/runtime-workspace-state.js";
 import {
@@ -477,6 +478,7 @@ function buildSessionsListResult(params: {
     nextOffset: list.nextOffset,
     hasMore: list.hasMore,
     creators: list.creators,
+    categories: listSqliteLiveSessionCategories(),
     defaults: getSessionDefaults(params.cfg, params.modelCatalog, {
       ...(params.agentId ? { agentId: params.agentId } : {}),
       allowPluginNormalization: false,

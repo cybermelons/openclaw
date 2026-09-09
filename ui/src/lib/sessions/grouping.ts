@@ -40,16 +40,30 @@ export function normalizeSessionSectionOrder(
   stored: readonly string[],
   knownGroups: readonly string[],
   knownCatalogIds: readonly string[] = [],
+  catalogLoaded = true,
+  loadedRowCategories: readonly string[] = [],
 ): string[] {
   const groups = [...new Set(knownGroups.map((name) => name.trim()).filter(Boolean))];
   const knownGroupSet = new Set(groups);
+  const loadedRowCategorySet = new Set(
+    loadedRowCategories.map((name) => name.trim()).filter(Boolean),
+  );
   const catalogIds = [
     ...new Set(knownCatalogIds.map((catalogId) => catalogId.trim()).filter(Boolean)),
   ];
   const knownCatalogIdSet = new Set(catalogIds);
   const order = (normalizeSessionSectionOrderTokens(stored) ?? []).filter((token) => {
     if (token.startsWith("category:")) {
-      return knownGroupSet.has(token.slice("category:".length));
+      const category = token.slice("category:".length);
+      // Before the server catalog has loaded, `knownGroups` is only a
+      // partial view (old gateway, early race): never drop a stored
+      // category token, or a live category can flicker out of the sidebar.
+      // Once loaded, drop only when the category is absent from all three
+      // authoritative-or-supplementary sources.
+      if (!catalogLoaded) {
+        return true;
+      }
+      return knownGroupSet.has(category) || loadedRowCategorySet.has(category);
     }
     if (token.startsWith("catalog:")) {
       return knownCatalogIdSet.has(token.slice("catalog:".length));
@@ -232,6 +246,7 @@ export function groupSidebarSessionRows<Row extends SidebarGroupableRow>(
     grouping?: SidebarSessionsGrouping;
     sectionOrder?: readonly string[];
     catalogIds?: readonly string[];
+    catalogLoaded?: boolean;
   } = {},
 ): SidebarSessionSection<Row>[] {
   const grouping = options.grouping ?? "category";
@@ -240,7 +255,12 @@ export function groupSidebarSessionRows<Row extends SidebarGroupableRow>(
   const groups: Row[] = [];
   const coding: Row[] = [];
   const categories = new Map<string, Row[]>();
+  const loadedRowCategories = new Set<string>();
   if (grouping === "category") {
+    // A catalog-only category (no loaded rows in `rows`) still seeds an
+    // empty Map entry here, so it renders as an empty section instead of
+    // being omitted (issue #112). Follow-up, out of scope here: fetch a
+    // small on-demand page for an empty catalog section when it expands.
     for (const name of options.knownGroups ?? []) {
       const trimmed = name.trim();
       if (trimmed && !categories.has(trimmed)) {
@@ -255,6 +275,7 @@ export function groupSidebarSessionRows<Row extends SidebarGroupableRow>(
     }
     const category = grouping === "category" ? row.category?.trim() : undefined;
     if (category) {
+      loadedRowCategories.add(category);
       const categoryRows = categories.get(category);
       if (categoryRows) {
         categoryRows.push(row);
@@ -312,8 +333,21 @@ export function groupSidebarSessionRows<Row extends SidebarGroupableRow>(
       options.sectionOrder,
       orderedCategories,
       catalogIds,
+      options.catalogLoaded,
+      [...loadedRowCategories],
     )) {
-      const section = sectionsById.get(sectionId as SidebarSessionSection<Row>["id"]);
+      let section = sectionsById.get(sectionId as SidebarSessionSection<Row>["id"]);
+      if (!section && sectionId.startsWith("category:")) {
+        // Before the catalog has loaded, `normalizeSessionSectionOrder` keeps
+        // a stored `category:X` token even when X has no loaded rows and
+        // isn't yet a known group. Synthesize the empty section so the token
+        // surviving normalization actually renders (issue #112 flicker fix).
+        section = {
+          id: sectionId as `category:${string}`,
+          category: sectionId.slice("category:".length),
+          rows: [],
+        };
+      }
       if (section) {
         sections.push(section);
         sectionsById.delete(section.id);

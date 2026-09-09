@@ -67,6 +67,13 @@ export type SessionsListResultBase<TDefaults, TRow> = {
   hasMore?: boolean;
   /** Complete owner facet for the filtered result, independent of pagination. */
   creators?: Array<{ id: string; label?: string; avatarUrl?: string }>;
+  /**
+   * The category catalog: distinct category names with at least one live
+   * (un-archived) session row, independent of pagination. Complete and
+   * current as of this payload; absence of a name means no live rows exist
+   * for it, not "unknown".
+   */
+  categories?: string[];
   defaults: TDefaults;
   sessions: TRow[];
 };

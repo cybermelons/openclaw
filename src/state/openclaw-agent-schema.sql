@@ -69,6 +69,10 @@ CREATE INDEX IF NOT EXISTS idx_agent_session_nodes_archived_at
 CREATE INDEX IF NOT EXISTS idx_agent_session_nodes_current_session_id
   ON session_nodes(current_session_id);
 
+CREATE INDEX IF NOT EXISTS idx_agent_session_nodes_category_live
+  ON session_nodes (category)
+  WHERE archived_at IS NULL AND category IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_agent_session_nodes_entry_valid_pending
   ON session_nodes(session_key)
   WHERE entry_valid = 0;
