@@ -136,6 +136,22 @@ export async function runExclusiveSqliteSessionWrite<T>(
   }
 }
 
+// issue #118: a malformed or agent-less session key must produce a typed, classifiable
+// error, not a bare Error that a detached promise rejection can turn into a fatal
+// process exit. The stable `code` lets the gateway boundary map it to a client error and
+// lets the unhandled-rejection backstop classify it as non-fatal.
+export class SqliteScopeResolutionError extends Error {
+  readonly code = "invalid_session_key" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "SqliteScopeResolutionError";
+  }
+}
+
+export function isSqliteScopeResolutionError(error: unknown): error is SqliteScopeResolutionError {
+  return error instanceof SqliteScopeResolutionError;
+}
+
 export function resolveSqliteScope(
   scope: Pick<
     SessionAccessScope,
@@ -165,7 +181,7 @@ export function resolveSqliteScope(
     storeShared: storeTarget?.shared,
   });
   if (!agentId) {
-    throw new Error("Cannot resolve SQLite session scope without an agent id");
+    throw new SqliteScopeResolutionError("Cannot resolve SQLite session scope without an agent id");
   }
   const normalizedSessionKey = normalizeSqliteSessionKey(scope.sessionKey);
   const sessionKey =
@@ -219,7 +235,9 @@ export function resolveSqliteReadScope(
     storeShared: storeTarget?.shared,
   });
   if (!agentId) {
-    throw new Error("Cannot resolve SQLite transcript read scope without an agent id");
+    throw new SqliteScopeResolutionError(
+      "Cannot resolve SQLite transcript read scope without an agent id",
+    );
   }
   return {
     agentId,
@@ -316,12 +334,12 @@ export function resolveSqliteTranscriptScope(
   >,
 ): ResolvedTranscriptScope {
   if (!scope.sessionId) {
-    throw new Error(
+    throw new SqliteScopeResolutionError(
       `Cannot resolve SQLite transcript scope without a session id: ${scope.sessionKey}`,
     );
   }
   if (!scope.sessionKey) {
-    throw new Error(
+    throw new SqliteScopeResolutionError(
       `Cannot resolve SQLite transcript scope without a session key: ${scope.sessionId}`,
     );
   }
