@@ -8,6 +8,7 @@ import {
   gatewayStartupUnavailableDetails,
   GATEWAY_STARTUP_RETRY_AFTER_MS,
 } from "../../packages/gateway-protocol/src/startup-unavailable.js";
+import { isSqliteScopeResolutionError } from "../config/sessions/session-accessor.sqlite-scope.js";
 import { getActivePluginHttpRouteRegistry, getActivePluginRegistry } from "../plugins/runtime.js";
 import {
   getPluginRuntimeGatewayRequestScope,
@@ -526,6 +527,12 @@ export async function runWithGatewayRequestEnvelope<T>(
     } catch (error) {
       if (error instanceof SessionMutationAuthorizationChangedError) {
         return await options.reject(error.error);
+      }
+      // issue #118: a malformed or agent-less session key is client input, not a server
+      // fault. Map it to a client error at the boundary so it never propagates as a 500 or
+      // reaches the process as an unhandled rejection that could exit the gateway.
+      if (isSqliteScopeResolutionError(error)) {
+        return await options.reject(errorShape(ErrorCodes.INVALID_REQUEST, error.message));
       }
       const staleInstall = classifyGatewayStaleInstall(error);
       if (staleInstall) {

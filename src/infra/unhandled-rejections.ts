@@ -284,9 +284,42 @@ export function isTransientFileWatchError(err: unknown): boolean {
   return false;
 }
 
+// issue #118: a malformed client session key can reach the resolver on a detached
+// promise. Its throw (SqliteScopeResolutionError, code "invalid_session_key") is a
+// client-input fault, not a process fault. Classify it as non-fatal so a bad request
+// cannot exit the gateway, and count it so operators can see the backstop is catching it.
+let sqliteScopeRejectionCount = 0;
+
+export function isSqliteScopeResolutionRejection(err: unknown): boolean {
+  for (const candidate of collectNestedErrorCandidates(err)) {
+    if (readErrorName(candidate) === "SqliteScopeResolutionError") {
+      return true;
+    }
+    if (extractErrorCode(candidate) === "invalid_session_key") {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function getUnhandledSqliteScopeRejectionCount(): number {
+  return sqliteScopeRejectionCount;
+}
+
+export function resetUnhandledSqliteScopeRejectionCountForTest(): void {
+  sqliteScopeRejectionCount = 0;
+}
+
+export function noteSuppressedSqliteScopeRejection(): void {
+  sqliteScopeRejectionCount += 1;
+}
+
 export function isTransientUnhandledRejectionError(err: unknown): boolean {
   return (
-    isTransientNetworkError(err) || isTransientSqliteError(err) || isTransientFileWatchError(err)
+    isSqliteScopeResolutionRejection(err) ||
+    isTransientNetworkError(err) ||
+    isTransientSqliteError(err) ||
+    isTransientFileWatchError(err)
   );
 }
 
@@ -416,6 +449,11 @@ export function installUnhandledRejectionHandler(): void {
     }
 
     if (isTransientUnhandledRejectionError(reason)) {
+      if (isSqliteScopeResolutionRejection(reason)) {
+        // issue #118: count only the rejections the process handler actually absorbs, so the
+        // metric reflects real backstop activity and not test-time predicate calls.
+        noteSuppressedSqliteScopeRejection();
+      }
       console.warn(
         "[openclaw] Non-fatal unhandled rejection (continuing):",
         formatUncaughtError(reason),
