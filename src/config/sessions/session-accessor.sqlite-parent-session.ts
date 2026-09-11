@@ -38,7 +38,7 @@ import {
   formatLegacySqliteSessionMarkerForScope,
   formatSqliteSessionReferenceForScope,
   normalizeSqliteSessionKey,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   resolveSqliteStoreScope,
   resolveSqliteTranscriptArchiveDirectory,
   runExclusiveSqliteSessionWrite,
@@ -56,13 +56,13 @@ import { mergeSessionEntry, resolveFreshSessionTotalTokens } from "./types.js";
 export async function forkSessionTranscriptFromParent(
   params: ForkSessionFromParentTranscriptParams,
 ): Promise<ForkSessionFromParentTranscriptResult> {
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     sessionKey: params.sessionKey,
     storePath: params.storePath,
   });
   const target = params.targetStorePath
-    ? resolveSqliteScope({ sessionKey: params.sessionKey, storePath: params.targetStorePath })
+    ? resolveSqliteAccessScope({ sessionKey: params.sessionKey, storePath: params.targetStorePath })
     : resolved;
   const crossDatabase =
     target.agentId !== resolved.agentId || (target.path ?? "") !== (resolved.path ?? "");

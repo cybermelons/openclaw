@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { loadExactSessionEntry, replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import {
-  resolveSqliteScope,
+  resolveSqliteScopeForAgent,
   runExclusiveSqliteSessionWrite,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
 import {
@@ -47,7 +47,7 @@ describe("CronService.remove session cleanup", () => {
       payload: { kind: "agentTurn", message: "work" },
     });
     const sessionKey = `agent:main:cron:${job.id}`;
-    const databasePath = resolveSqliteScope({
+    const databasePath = resolveSqliteScopeForAgent({
       agentId: "main",
       sessionKey,
       storePath: sessionStorePath,
@@ -144,7 +144,7 @@ describe("CronService.remove session cleanup", () => {
 
     const writerEntered = createDeferred();
     const releaseWriter = createDeferred();
-    const resolvedSessionScope = resolveSqliteScope({
+    const resolvedSessionScope = resolveSqliteScopeForAgent({
       agentId: "main",
       sessionKey,
       storePath: sessionStorePath,

@@ -1,6 +1,6 @@
 import type { Insertable } from "kysely";
 import {
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   toDatabaseOptions,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
 import type { DB as OpenClawAgentKyselyDatabase } from "../state/openclaw-agent-db.generated.js";
@@ -40,7 +40,7 @@ export function recordMessageToolRunOutcome(params: {
     run_status: params.runStatus,
     occurred_at: params.occurredAt,
   };
-  const databaseOptions = toDatabaseOptions(resolveSqliteScope(params));
+  const databaseOptions = toDatabaseOptions(resolveSqliteAccessScope(params));
   ensureMessageToolRunOutcomeSchema(openOpenClawAgentDatabase(databaseOptions).db);
   runOpenClawAgentWriteTransaction(
     ({ db }) => {

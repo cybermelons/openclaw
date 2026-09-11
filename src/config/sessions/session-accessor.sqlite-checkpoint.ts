@@ -17,7 +17,7 @@ import {
   formatSqliteSessionReferenceForScope,
   getSessionKysely,
   normalizeSqliteSessionKey,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
   type ResolvedSqliteScope,
@@ -97,7 +97,7 @@ export async function branchCompactionCheckpointSession(
   const sourceKey = normalizeSqliteSessionKey(params.sourceStoreKey ?? params.sourceKey);
   const requestedSourceKey = normalizeSqliteSessionKey(params.sourceKey);
   const targetKey = normalizeSqliteSessionKey(params.nextKey);
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     ...(params.env ? { env: params.env } : {}),
     sessionKey: sourceKey,
@@ -135,7 +135,7 @@ export async function restoreCompactionCheckpointSession(
 ): Promise<SqliteCompactionCheckpointSessionMutationResult> {
   const sessionKey = normalizeSqliteSessionKey(params.sessionStoreKey ?? params.sessionKey);
   const targetKey = normalizeSqliteSessionKey(params.sessionKey);
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     ...(params.env ? { env: params.env } : {}),
     sessionKey,

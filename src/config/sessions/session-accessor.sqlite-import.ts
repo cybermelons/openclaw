@@ -14,7 +14,7 @@ import { readTranscriptEventJsonSetInTransaction } from "./session-accessor.sqli
 import {
   formatSqliteSessionReferenceForScope,
   getSessionKysely,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
@@ -57,7 +57,7 @@ function prepareSqliteSessionImport(params: SqliteSessionImportRowsParams) {
   if (params.readExactTranscriptRows && params.readTranscriptEvents) {
     throw new Error("SQLite session import accepts only one transcript row source");
   }
-  const resolvedScope = resolveSqliteScope({
+  const resolvedScope = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     ...(params.env ? { env: params.env } : {}),
     sessionKey: params.sessionKey,

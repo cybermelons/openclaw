@@ -2,7 +2,7 @@ import { executeSqliteQuerySync } from "../../infra/kysely-sync.js";
 import { withOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
 import {
   getSessionKysely,
-  resolveSqliteScope,
+  resolveSqliteAgentScope,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
 import type { SessionEntryListScope } from "./session-accessor.types.js";
@@ -13,7 +13,7 @@ import type { SessionEntryListScope } from "./session-accessor.types.js";
  * Returned sorted and deduplicated.
  */
 export function listSqliteLiveSessionCategories(scope: SessionEntryListScope = {}): string[] {
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const databaseOptions = toDatabaseOptions(resolved);
   const result = withOpenClawAgentDatabaseReadOnly((database) => {
     const db = getSessionKysely(database.db);

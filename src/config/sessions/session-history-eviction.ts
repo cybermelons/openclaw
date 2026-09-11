@@ -31,7 +31,7 @@ import {
 } from "./session-accessor.sqlite-lifecycle-state.js";
 import {
   getSessionKysely,
-  resolveSqliteScope,
+  resolveSqliteAgentScope,
   resolveSqliteTranscriptArchiveDirectory,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
@@ -93,9 +93,8 @@ export async function inspectSqliteSessionHistoryDiskBudget(
   // Predict only definite reclamation: prunable archives or unprotected
   // historical generations. Checkpoint-only byte reclamation stays out of the
   // preview; applied summaries report it via their byte-decrease predicate.
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAgentScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
-    sessionKey: "",
     storePath: params.storePath,
   });
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
@@ -561,9 +560,8 @@ async function enforceSessionHistoryMaintenanceSerialized(
     });
   }
 
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAgentScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
-    sessionKey: "",
     storePath: params.storePath,
   });
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));

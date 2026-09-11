@@ -13,7 +13,7 @@ import {
   cloneSessionEntry,
   getSessionKysely,
   resolveSqliteReadScope,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   toDatabaseOptions,
   type SessionSqliteTargetResolutionCache,
 } from "./session-accessor.sqlite-scope.js";
@@ -47,7 +47,7 @@ export function loadExactSessionEntryReadOnlyResult(
   if (!sessionKey) {
     return { found: true, value: undefined };
   }
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   let result:
     | { found: true; value: { entry: SessionEntry | undefined; rowExists: boolean } }
     | { found: false; reason: "database-missing" | "schema-missing" | "table-missing" };

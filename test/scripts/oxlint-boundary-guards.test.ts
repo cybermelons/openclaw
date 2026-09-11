@@ -23,6 +23,11 @@ const cases = [
     violation: `${FIXTURES}/chained-type-assertions-violation.ts`,
     violations: 3,
   },
+  {
+    rule: "openclaw-boundaries/no-sqlite-empty-session-key",
+    violation: `${FIXTURES}/sqlite-empty-session-key-violation.ts`,
+    violations: 3,
+  },
 ];
 
 function runGuard(target: string) {

@@ -152,12 +152,40 @@ export function isSqliteScopeResolutionError(error: unknown): error is SqliteSco
   return error instanceof SqliteScopeResolutionError;
 }
 
-export function resolveSqliteScope(
-  scope: Pick<
-    SessionAccessScope,
-    "agentId" | "defaultAgentId" | "env" | "sessionKey" | "storePath"
-  >,
-): ResolvedSqliteScope {
+// issue #118: An explicit agent id that disagrees with the store-owner agent id is a distinct,
+// classifiable failure. It is not a bad client key and not an internal defect, so it carries its
+// own stable `code`. The gateway boundary can map it to a client error; the unhandled-rejection
+// backstop can classify it as non-fatal.
+export class SqliteAgentKeyMismatchError extends Error {
+  readonly code = "agent_key_mismatch" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "SqliteAgentKeyMismatchError";
+  }
+}
+
+export function isSqliteAgentKeyMismatchError(
+  error: unknown,
+): error is SqliteAgentKeyMismatchError {
+  return error instanceof SqliteAgentKeyMismatchError;
+}
+
+// issue #118: A Result carries a resolution failure without a throw. The session-key path
+// derives an agent id from client input, so it can fail on bad input. It returns this Result
+// and never throws. Callers must handle `ok: false` and must not assume a scope.
+export type SqliteScopeResult =
+  | { ok: true; scope: ResolvedSqliteScope }
+  | { ok: false; error: SqliteScopeResolutionError };
+
+type SqliteScopeCoreInput = Pick<
+  SessionAccessScope,
+  "agentId" | "defaultAgentId" | "env" | "sessionKey" | "storePath"
+>;
+
+// issue #118: The shared resolution body. `resolveSqliteScope` is deleted. The two public
+// entry points below wrap this core with different required inputs, so the type system forces
+// each caller to prove it has either an explicit agent id or a parseable session key.
+function resolveSqliteScopeCore(scope: SqliteScopeCoreInput): ResolvedSqliteScope {
   const parsedAgentId = parseAgentSessionKey(scope.sessionKey)?.agentId;
   const scopedAgentId = scope.agentId ? normalizeAgentId(scope.agentId) : parsedAgentId;
   const incognitoAgentId = isIncognitoSessionKey(scope.sessionKey)
@@ -198,6 +226,54 @@ export function resolveSqliteScope(
     ...(storeTarget ? { path: storeTarget.path } : {}),
     sessionKey,
   };
+}
+
+// issue #118: Resolve a scope from an explicit agent id. The caller holds the agent id, so the
+// resolver cannot fail for a missing agent and does not throw for one. An absent `sessionKey`
+// means "agent-wide scope, no single session"; it maps to the old `sessionKey: ""` idiom plus
+// an explicit `agentId`. An empty `agentId` is a programmer error, not client input, so it
+// throws a `TypeError` at this one place.
+export function resolveSqliteScopeForAgent(
+  input: {
+    agentId: string;
+  } & Pick<SessionAccessScope, "defaultAgentId" | "env" | "storePath"> & {
+      sessionKey?: string;
+    },
+): ResolvedSqliteScope {
+  if (input.agentId === "") {
+    throw new TypeError("resolveSqliteScopeForAgent requires a non-empty agentId");
+  }
+  return resolveSqliteScopeCore({
+    agentId: input.agentId,
+    ...(input.defaultAgentId !== undefined ? { defaultAgentId: input.defaultAgentId } : {}),
+    ...(input.env ? { env: input.env } : {}),
+    sessionKey: input.sessionKey ?? "",
+    ...(input.storePath !== undefined ? { storePath: input.storePath } : {}),
+  });
+}
+
+// issue #118: Resolve a scope from a session key alone, with no explicit agent id. The agent id
+// is derived from the key, so a malformed or agent-less key fails. It returns a Result and never
+// throws. The caller must handle `ok: false`.
+export function resolveSqliteScopeFromSessionKey(
+  input: {
+    sessionKey: string;
+  } & Pick<SessionAccessScope, "defaultAgentId" | "env" | "storePath">,
+): SqliteScopeResult {
+  try {
+    const scope = resolveSqliteScopeCore({
+      ...(input.defaultAgentId !== undefined ? { defaultAgentId: input.defaultAgentId } : {}),
+      ...(input.env ? { env: input.env } : {}),
+      sessionKey: input.sessionKey,
+      ...(input.storePath !== undefined ? { storePath: input.storePath } : {}),
+    });
+    return { ok: true, scope };
+  } catch (error) {
+    if (isSqliteScopeResolutionError(error)) {
+      return { ok: false, error };
+    }
+    throw error;
+  }
 }
 
 export function resolveSqliteReadScope(
@@ -282,15 +358,87 @@ function resolveCachedSqliteStoreTarget(
   return resolved;
 }
 
+// issue #118: The store path owns an agent id when the database is owned. When the caller also
+// gives an explicit agent id, use the explicit-agent path. When it does not, the store path is
+// the only source of the agent id, so derive it through the session-key Result path (empty key)
+// and let the store-owner rule inside the core supply the agent id. A store with no owner and no
+// explicit agent id cannot resolve; the Result reports that without a throw.
 export function resolveSqliteStoreScope(
   storePath: string,
   options: { agentId?: string } = {},
 ): ResolvedSqliteScope {
-  return resolveSqliteScope({
-    ...(options.agentId ? { agentId: options.agentId } : {}),
-    sessionKey: "",
-    storePath,
+  if (options.agentId) {
+    return resolveSqliteScopeForAgent({
+      agentId: options.agentId,
+      storePath,
+    });
+  }
+  const result = resolveSqliteScopeFromSessionKey({ sessionKey: "", storePath });
+  if (!result.ok) {
+    throw result.error;
+  }
+  return result.scope;
+}
+
+// issue #118: A full access scope carries a session key and may carry an agent id. It resolves
+// through the explicit-agent path when an agent id is present, otherwise through the session-key
+// Result path. A Result failure re-throws the typed error, so this helper keeps the pre-#118
+// throw contract that the session accessor callers depend on. The gateway boundary (Layer 0) and
+// the key validator (Layer 1) convert that throw to a typed client error before it can escape.
+export function resolveSqliteAccessScope(
+  scope: Pick<
+    SessionAccessScope,
+    "agentId" | "defaultAgentId" | "env" | "sessionKey" | "storePath"
+  >,
+): ResolvedSqliteScope {
+  if (scope.agentId) {
+    return resolveSqliteScopeForAgent({
+      agentId: scope.agentId,
+      ...(scope.defaultAgentId !== undefined ? { defaultAgentId: scope.defaultAgentId } : {}),
+      ...(scope.env ? { env: scope.env } : {}),
+      sessionKey: scope.sessionKey,
+      ...(scope.storePath !== undefined ? { storePath: scope.storePath } : {}),
+    });
+  }
+  const result = resolveSqliteScopeFromSessionKey({
+    ...(scope.defaultAgentId !== undefined ? { defaultAgentId: scope.defaultAgentId } : {}),
+    ...(scope.env ? { env: scope.env } : {}),
+    sessionKey: scope.sessionKey,
+    ...(scope.storePath !== undefined ? { storePath: scope.storePath } : {}),
   });
+  if (!result.ok) {
+    throw result.error;
+  }
+  return result.scope;
+}
+
+// issue #118: An agent-wide list or count scope has no single session key. It formerly passed
+// `sessionKey: ""`. It resolves through the explicit-agent path when an agent id is present,
+// otherwise through the session-key Result path (empty key), where the store-owner rule supplies
+// the agent id from a `storePath`. A scope with neither an agent id nor an owned store cannot
+// resolve; it throws the typed `SqliteScopeResolutionError`, the same failure the old empty-key
+// call produced, now classifiable at the boundary and the backstop.
+export function resolveSqliteAgentScope(
+  scope: Pick<SessionAccessScope, "agentId" | "defaultAgentId" | "env" | "storePath">,
+): ResolvedSqliteScope {
+  if (scope.agentId) {
+    return resolveSqliteScopeForAgent({
+      agentId: scope.agentId,
+      ...(scope.defaultAgentId !== undefined ? { defaultAgentId: scope.defaultAgentId } : {}),
+      ...(scope.env ? { env: scope.env } : {}),
+      ...(scope.storePath !== undefined ? { storePath: scope.storePath } : {}),
+    });
+  }
+  const result = resolveSqliteScopeFromSessionKey({
+    ...(scope.defaultAgentId !== undefined ? { defaultAgentId: scope.defaultAgentId } : {}),
+    ...(scope.env ? { env: scope.env } : {}),
+    sessionKey: "",
+    ...(scope.storePath !== undefined ? { storePath: scope.storePath } : {}),
+  });
+  if (!result.ok) {
+    throw result.error;
+  }
+  return result.scope;
 }
 
 function resolveSqliteAgentId(params: {
@@ -306,7 +454,7 @@ function resolveSqliteAgentId(params: {
     scopedAgentId !== params.storeAgentId &&
     !params.storeShared
   ) {
-    throw new Error(
+    throw new SqliteAgentKeyMismatchError(
       `SQLite session store path belongs to agent ${params.storeAgentId}; requested agent ${scopedAgentId}.`,
     );
   }
@@ -343,10 +491,44 @@ export function resolveSqliteTranscriptScope(
       `Cannot resolve SQLite transcript scope without a session key: ${scope.sessionId}`,
     );
   }
+  const resolved = resolveTranscriptWriteBaseScope({
+    ...(scope.agentId ? { agentId: scope.agentId } : {}),
+    ...(scope.env ? { env: scope.env } : {}),
+    sessionKey: scope.sessionKey,
+    ...(scope.storePath !== undefined ? { storePath: scope.storePath } : {}),
+  });
   return {
-    ...resolveSqliteScope({ ...scope, sessionKey: scope.sessionKey }),
+    ...resolved,
     sessionId: scope.sessionId,
   };
+}
+
+// issue #118: A transcript write already proved it holds a session key. It resolves through the
+// explicit-agent path when an agent id is present, otherwise through the session-key Result path.
+// A Result failure keeps the pre-#118 throw contract of this write scope.
+function resolveTranscriptWriteBaseScope(input: {
+  agentId?: string;
+  env?: NodeJS.ProcessEnv;
+  sessionKey: string;
+  storePath?: string;
+}): ResolvedSqliteScope {
+  if (input.agentId) {
+    return resolveSqliteScopeForAgent({
+      agentId: input.agentId,
+      ...(input.env ? { env: input.env } : {}),
+      sessionKey: input.sessionKey,
+      ...(input.storePath !== undefined ? { storePath: input.storePath } : {}),
+    });
+  }
+  const result = resolveSqliteScopeFromSessionKey({
+    ...(input.env ? { env: input.env } : {}),
+    sessionKey: input.sessionKey,
+    ...(input.storePath !== undefined ? { storePath: input.storePath } : {}),
+  });
+  if (!result.ok) {
+    throw result.error;
+  }
+  return result.scope;
 }
 
 export function resolveSqliteTranscriptReadScope(

@@ -59,7 +59,8 @@ import {
 import {
   cloneSessionEntry,
   getSessionKysely,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
+  resolveSqliteAgentScope,
   resolveSqliteStoreScope,
   resolveSqliteTranscriptArchiveDirectory,
   resolveSqliteTranscriptReadScope,
@@ -142,7 +143,7 @@ export function resolveSessionEntry(
   scope: SessionAccessScope,
   options: { readOnly?: boolean } = {},
 ): ResolvedSqliteSessionEntry {
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   const read = (
     database: Pick<OpenClawAgentDatabase, "agentId" | "db" | "path">,
   ): ResolvedSqliteSessionEntry => {
@@ -183,7 +184,7 @@ export function loadExactSessionEntry(scope: SessionAccessScope): ExactSessionEn
   if (!sessionKey) {
     return undefined;
   }
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
   const entry = readExactSessionEntryRowValidated(database, sessionKey)?.entry;
   return entry
@@ -195,7 +196,7 @@ export function loadExactSessionEntry(scope: SessionAccessScope): ExactSessionEn
 export function listSessionEntryKeysReadOnly(
   scope: Partial<Omit<SessionAccessScope, "sessionKey">> = {},
 ): string[] {
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const result = withOpenClawAgentDatabaseReadOnly((database) => {
     return [...readSessionEntrySnapshot(database, resolved, scope.readConsistency).keys];
   }, toDatabaseOptions(resolved));
@@ -210,7 +211,7 @@ export function loadExactSessionEntryReadOnly(
   if (!sessionKey) {
     return undefined;
   }
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   const result = withOpenClawAgentDatabaseReadOnly(
     (database) => readExactSessionEntryRowValidated(database, sessionKey)?.entry,
     toDatabaseOptions(resolved),
@@ -225,7 +226,7 @@ export function loadExactSessionEntryReadOnly(
 
 /** Lists direct child rows without cloning or rebuilding the complete session store. */
 export function listSessionChildEntriesReadOnly(scope: SessionAccessScope): SessionEntrySummary[] {
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   const result = withOpenClawAgentDatabaseReadOnly((database) => {
     const snapshot = readSessionEntrySnapshot(database, resolved, scope.readConsistency);
     const childKeys = getChildSessionKeysByParent(snapshot.entries).get(resolved.sessionKey) ?? [];
@@ -264,7 +265,7 @@ export function resolveSessionKeyBySessionId(
 
 /** Lists session entries from the additive SQLite session store. */
 export function listSessionEntryRows(scope: SessionEntryListScope = {}): SessionEntrySummary[] {
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
   return listSqliteSessionEntriesFromDatabase(database, resolved, scope);
 }
@@ -277,7 +278,7 @@ export function listSessionEntryRows(scope: SessionEntryListScope = {}): Session
 export function listSessionEntriesReadOnly(
   scope: SessionEntryListScope = {},
 ): SessionEntrySummary[] {
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const result = withOpenClawAgentDatabaseReadOnly(
     (database) => listSqliteSessionEntriesFromDatabase(database, resolved, scope),
     toDatabaseOptions(resolved),
@@ -287,7 +288,7 @@ export function listSessionEntriesReadOnly(
 
 /** Counts durable session rows without materializing entry JSON or warming the entry cache. */
 export function countSessionEntryRowsReadOnly(scope: SessionEntryListScope = {}): number {
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const result = withOpenClawAgentDatabaseReadOnly((database) => {
     const db = getSessionKysely(database.db);
     const row = executeSqliteQueryTakeFirstSync(
@@ -321,7 +322,7 @@ export function hasSessionEntriesByStatusReadOnly(
     return false;
   }
   const selectedStatusSet = new Set<string>(selectedStatuses);
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const result = withOpenClawAgentDatabaseReadOnly((database) => {
     const db = getSessionKysely(database.db);
     const rows = executeSqliteQuerySync(
@@ -401,7 +402,7 @@ export function listSessionEntriesByStatus(
   scope: Partial<Omit<SessionAccessScope, "sessionKey">>,
   statuses: readonly SessionEntryStatus[],
 ): SessionEntrySummary[] {
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
   return readSessionEntriesByStatus(database, statuses).filter(
     ({ sessionKey }) => !isInternalSessionEffectsKey(sessionKey),
@@ -412,7 +413,7 @@ export function listSessionEntriesByStatus(
 export function listSessionTranscriptInstances(
   scope: Partial<Omit<SessionAccessScope, "sessionKey">> = {},
 ): SessionTranscriptInstance[] {
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
   const currentEntries = new Map(
     listSessionEntryRows(scope).map((summary) => [summary.sessionKey, summary.entry]),
@@ -427,7 +428,7 @@ export function listSessionTranscriptInstances(
 
 /** Reads a session activity timestamp from the additive SQLite session store. */
 export function readSessionUpdatedAtCore(scope: SessionAccessScope): number | undefined {
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
   const entry = readSessionEntryRow(database, resolved.sessionKey)?.entry;
   return entry?.updatedAt;
@@ -456,7 +457,7 @@ export async function replaceSessionEntry(
 
 /** Replaces one entry synchronously for sync session runtimes. */
 export function replaceSessionEntrySync(scope: SessionAccessScope, entry: SessionEntry): void {
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   assertCanonicalSessionWriteScope(resolved);
   let previous = new Map<string, SessionEntry>();
   let current = new Map<string, SessionEntry>();
@@ -477,7 +478,7 @@ export function ensureSessionEntrySync(
 ): boolean {
   // Every sync initializer inherits and enforces the admitted writer claim.
   const fencedScope = withOwnedSessionTranscriptWriterFence(scope);
-  const resolved = resolveSqliteScope(fencedScope);
+  const resolved = resolveSqliteAccessScope(fencedScope);
   assertCanonicalSessionWriteScope(resolved);
   let owned = false;
   let previous = new Map<string, SessionEntry>();
@@ -520,7 +521,7 @@ export async function patchSessionEntryCore(
   ) => Promise<Partial<SessionEntry> | null> | Partial<SessionEntry> | null,
   options: SqliteSessionEntryPatchOptions = {},
 ): Promise<SessionEntry | null> {
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   assertCanonicalSessionWriteScope(resolved);
   return await patchSqliteSessionEntrySnapshot<
     ReturnType<typeof readSessionEntrySelectionSnapshot>

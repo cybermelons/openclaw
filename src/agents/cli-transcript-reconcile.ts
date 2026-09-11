@@ -18,7 +18,7 @@ import {
   writeSessionResumeEpoch,
 } from "../config/sessions/session-accessor.sqlite-resume-epoch-store.js";
 import {
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
@@ -144,7 +144,7 @@ function readMessageExternalId(message: unknown): string | undefined {
   return typeof externalId === "string" && externalId.trim() ? externalId : undefined;
 }
 
-type ResolvedDrainScope = ReturnType<typeof resolveSqliteScope>;
+type ResolvedDrainScope = ReturnType<typeof resolveSqliteAccessScope>;
 
 /**
  * Shared candidate resolution for both `reconcileCliTranscript` and
@@ -199,7 +199,7 @@ function resolveDrainCandidates(params: ReconcileCliTranscriptParams): DrainCand
     ...(binding.reseedReceipt ? { reseedReceipt: binding.reseedReceipt } : {}),
   });
 
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     ...(params.env ? { env: params.env } : {}),
     sessionKey: params.sessionKey,
@@ -356,7 +356,7 @@ export async function drainTailForResume(
   const resolved =
     resolution.kind === "candidates"
       ? resolution.resolved
-      : resolveSqliteScope({
+      : resolveSqliteAccessScope({
           ...(params.agentId ? { agentId: params.agentId } : {}),
           ...(params.env ? { env: params.env } : {}),
           sessionKey: params.sessionKey,

@@ -6,7 +6,7 @@ import { normalizeSessionDeliveryState } from "../../utils/delivery-context.shar
 import type { SessionEntrySummary } from "./session-accessor.sqlite-contract.js";
 import {
   getSessionKysely,
-  resolveSqliteScope,
+  resolveSqliteAgentScope,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
 import type { SessionEntryListScope } from "./session-accessor.types.js";
@@ -106,7 +106,7 @@ function hydrateCanonicalRepairEntry(row: CanonicalRepairRow): SessionEntry {
 export function listSqliteSessionEntriesWithCanonicalOwnerEvidence(
   scope: SessionEntryListScope = {},
 ): Array<SessionEntrySummary & { canonicalOwnerSessionKey?: string; rawEntryJson?: string }> {
-  const resolved = resolveSqliteScope({ ...scope, sessionKey: "" });
+  const resolved = resolveSqliteAgentScope(scope);
   const databaseOptions = toDatabaseOptions(resolved);
   const result = withOpenClawAgentDatabaseReadOnly((database) => {
     const db = getSessionKysely(database.db);

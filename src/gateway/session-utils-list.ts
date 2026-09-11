@@ -13,6 +13,7 @@ import {
 import { shouldKeepSubagentRunChildLink } from "../agents/subagents/registry/subagent-run-liveness.js";
 import type { SessionEntry } from "../config/sessions.js";
 import { listSqliteLiveSessionCategories } from "../config/sessions/session-accessor.sqlite-categories.js";
+import { isSqliteScopeResolutionError } from "../config/sessions/session-accessor.sqlite-scope.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { withPinnedActivePluginRegistryWorkspaceDir } from "../plugins/runtime-workspace-state.js";
 import {
@@ -468,12 +469,22 @@ function prepareSessionList(params: ListSessionsFromStoreParams) {
  * for it"), so [] would tell the client every category is empty and re-create
  * the #112 vanishing-section bug. An omitted field means "no change", which
  * leaves the client's existing catalog and its row-scan fallback intact.
+ *
+ * issue #118 Layer 2: the catalog query now resolves through the typed scope
+ * resolver. A scope with no agent id and no owned store returns a typed
+ * SqliteScopeResolutionError. Catch only that classifiable case here, so a real
+ * database fault still propagates instead of silently degrading the catalog.
+ * Full removal of this local guard belongs with Layer 1, when the gateway
+ * boundary validates the key and owns the error before the catalog query runs.
  */
 function listLiveSessionCategoriesSafe(agentId?: string): string[] | undefined {
   try {
     return listSqliteLiveSessionCategories(agentId ? { agentId } : {});
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (isSqliteScopeResolutionError(error)) {
+      return undefined;
+    }
+    throw error;
   }
 }
 

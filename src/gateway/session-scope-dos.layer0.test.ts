@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isSqliteScopeResolutionError,
-  resolveSqliteScope,
+  resolveSqliteScopeFromSessionKey,
   resolveSqliteTranscriptScope,
   SqliteScopeResolutionError,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
@@ -19,15 +19,16 @@ import {
   resetUnhandledSqliteScopeRejectionCountForTest,
 } from "../infra/unhandled-rejections.js";
 
-describe("issue #118 ring 1: resolver throws a typed scope error on client input", () => {
-  it("throws SqliteScopeResolutionError when no agent id can be resolved", () => {
+describe("issue #118 ring 1: resolver returns a typed scope error on client input", () => {
+  it("returns a typed SqliteScopeResolutionError when no agent id can be resolved", () => {
     // An empty session key with no explicit agent id is the exact recurring caller bug.
-    expect(() => resolveSqliteScope({ sessionKey: "" })).toThrow(SqliteScopeResolutionError);
-    try {
-      resolveSqliteScope({ sessionKey: "" });
-    } catch (error) {
-      expect(isSqliteScopeResolutionError(error)).toBe(true);
-      expect((error as SqliteScopeResolutionError).code).toBe("invalid_session_key");
+    // After Layer 2 the session-key path returns a Result instead of throwing, so the
+    // classifiable typed error reaches the caller without a bare throw.
+    const result = resolveSqliteScopeFromSessionKey({ sessionKey: "" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(isSqliteScopeResolutionError(result.error)).toBe(true);
+      expect(result.error.code).toBe("invalid_session_key");
     }
   });
 

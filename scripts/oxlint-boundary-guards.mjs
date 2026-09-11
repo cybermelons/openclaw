@@ -54,6 +54,80 @@ function restrictedCallRule({ allowedFiles = [], message, objects, property, roo
   };
 }
 
+// issue #118: The empty session-key idiom hid the missing-agent precondition that terminated the
+// gateway. Callers must state their intent through one of the two typed resolvers instead:
+// resolveSqliteScopeForAgent({ agentId }) for agent-wide scope, or
+// resolveSqliteScopeFromSessionKey({ sessionKey }) for a real key. This rule bans an object with a
+// `sessionKey: ""` property when that object is a direct argument of a SQLite scope call. It scopes
+// to scope-consuming calls, so an unrelated `sessionKey: ""` in a return value or a plain object
+// (for example a "nothing enqueued" result) is not a false positive.
+const SQLITE_SCOPE_CALLEE_RE = /(?:^resolveSqlite|Sqlite(?:Scope|Entry|Store)|upsertSessionEntry)/;
+
+function calleeNameOf(node) {
+  const callee = unwrapExpression(node.callee);
+  if (callee.type === "Identifier") {
+    return callee.name;
+  }
+  if (
+    callee.type === "MemberExpression" &&
+    !callee.computed &&
+    callee.property.type === "Identifier"
+  ) {
+    return callee.property.name;
+  }
+  return null;
+}
+
+function noSqliteEmptySessionKeyRule({ allowedFiles = [], message, roots }) {
+  return {
+    create(context) {
+      const filename = context.physicalFilename.replaceAll("\\", "/");
+      const cwd = context.cwd.replaceAll("\\", "/");
+      const repoPath = filename.startsWith(`${cwd}/`) ? filename.slice(cwd.length + 1) : filename;
+      if (
+        !filename.endsWith(".ts") ||
+        !roots.some((root) => pathMatchesTypeAssertionRoot(repoPath, root)) ||
+        TYPE_ASSERTION_TEST_FILE_SUFFIXES.some((suffix) => filename.endsWith(suffix)) ||
+        allowedFiles.includes(repoPath)
+      ) {
+        return {};
+      }
+      const objectHasEmptySessionKey = (objectExpression) =>
+        objectExpression.properties.some((property) => {
+          if (property.type !== "Property" || property.computed || property.shorthand) {
+            return false;
+          }
+          const key = property.key;
+          const keyName =
+            key.type === "Identifier"
+              ? key.name
+              : key.type === "Literal" && typeof key.value === "string"
+                ? key.value
+                : null;
+          if (keyName !== "sessionKey") {
+            return false;
+          }
+          const value = unwrapExpression(property.value);
+          return value.type === "Literal" && value.value === "";
+        });
+      return {
+        CallExpression(node) {
+          const calleeName = calleeNameOf(node);
+          if (calleeName === null || !SQLITE_SCOPE_CALLEE_RE.test(calleeName)) {
+            return;
+          }
+          for (const argument of node.arguments) {
+            const unwrapped = unwrapExpression(argument);
+            if (unwrapped.type === "ObjectExpression" && objectHasEmptySessionKey(unwrapped)) {
+              context.report({ message, node: unwrapped });
+            }
+          }
+        },
+      };
+    },
+  };
+}
+
 // Adapted from dmmulroy/anti-slop@446268e5d15baa968eaec669ff65358d36ae6259, MIT.
 function isTypeAssertionExpression(node) {
   return node.type === "TSAsExpression" || node.type === "TSTypeAssertion";
@@ -595,6 +669,14 @@ export default {
     "no-chained-type-assertions": noChainedTypeAssertionsRule({
       roots: [...TYPE_ASSERTION_PRODUCTION_ROOTS, BOUNDARY_GUARD_FIXTURE_ROOT],
       excludedRoots: CHAINED_ASSERTION_EXCLUDED_ROOTS,
+    }),
+    "no-sqlite-empty-session-key": noSqliteEmptySessionKeyRule({
+      roots: ["src", BOUNDARY_GUARD_FIXTURE_ROOT],
+      // The resolver module is the one sanctioned place that constructs the agent-wide scope from
+      // the empty key; its dispatchers are the replacement the rest of the code must call.
+      allowedFiles: ["src/config/sessions/session-accessor.sqlite-scope.ts"],
+      message:
+        'issue #118: do not pass sessionKey: "" to a SQLite scope. Use resolveSqliteScopeForAgent({ agentId }) for agent-wide scope, or resolveSqliteScopeFromSessionKey({ sessionKey }) for a real key. The empty-key idiom hides the missing-agent precondition that terminated the gateway.',
     }),
   },
 };
