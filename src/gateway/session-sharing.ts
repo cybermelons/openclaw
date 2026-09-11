@@ -263,7 +263,13 @@ export function authorizeSessionSharingTarget(params: {
       });
 }
 
-const SESSION_KEY_PARAM_BY_METHOD = new Map<string, "key" | "sessionKey">([
+/**
+ * issue #124 Layer 1: names which request param carries the client-supplied session key
+ * per method, so the gateway request boundary can validate it before dispatch. Exported
+ * (not widened) so the boundary guard and this module's own target resolution share one
+ * table — a method missing here silently skips both target resolution and key validation.
+ */
+export const SESSION_KEY_PARAM_BY_METHOD = new Map<string, "key" | "sessionKey">([
   ["agent", "sessionKey"],
   ["board.event", "sessionKey"],
   ["board.update", "sessionKey"],

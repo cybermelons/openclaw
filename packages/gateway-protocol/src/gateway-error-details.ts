@@ -31,6 +31,7 @@ export const GatewayErrorDetailCodes = {
   PROJECT_CLONE_FAILED: "PROJECT_CLONE_FAILED",
   UNKNOWN_AGENT_ID: "UNKNOWN_AGENT_ID",
   WIZARD_NOT_FOUND: "WIZARD_NOT_FOUND",
+  INVALID_SESSION_KEY: "INVALID_SESSION_KEY",
 } as const;
 
 /** Missing cron automation identified by its exact store key. */
@@ -68,6 +69,12 @@ export type WizardNotFoundErrorDetails = {
   code: typeof GatewayErrorDetailCodes.WIZARD_NOT_FOUND;
 };
 
+/** issue #124 Layer 1: a present but structurally malformed client session key. */
+export type InvalidSessionKeyErrorDetails = {
+  code: typeof GatewayErrorDetailCodes.INVALID_SESSION_KEY;
+  reason: string;
+};
+
 export type ProjectCloneFailureCause =
   | "invalid_url"
   | "auth_required"
@@ -89,7 +96,8 @@ export type GatewayErrorDetails =
   | UserPrefsLimitExceededErrorDetails
   | ProjectCloneErrorDetails
   | UnknownAgentIdErrorDetails
-  | WizardNotFoundErrorDetails;
+  | WizardNotFoundErrorDetails
+  | InvalidSessionKeyErrorDetails;
 
 type GatewayErrorLike = {
   code?: unknown;
