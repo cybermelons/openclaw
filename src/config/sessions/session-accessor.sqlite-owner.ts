@@ -10,7 +10,7 @@ import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
 import { publishSessionEntryCacheInvalidation } from "./session-accessor.sqlite-entry-cache.js";
 import {
   getSessionKysely,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
 import type { SessionCreatedActor, SessionOwnerAssignment } from "./session-entry-provenance.js";
@@ -34,7 +34,7 @@ export function assignSessionOwner(
     assertCurrent?: () => void;
   },
 ): SessionOwnerAssignment | null {
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   const options = toDatabaseOptions(resolved);
   const opened = openOpenClawAgentDatabase(options);
   const assignedAt = params.assignedAt ?? Date.now();

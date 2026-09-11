@@ -11,7 +11,7 @@ import {
   type OpenClawAgentDatabaseOptions,
 } from "../../state/openclaw-agent-db.js";
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
-import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
+import { resolveSqliteAccessScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
 
 type SessionMemberDatabase = Pick<OpenClawAgentKyselyDatabase, "session_members">;
 
@@ -24,7 +24,7 @@ type SessionMember = {
 const SESSION_MEMBERSHIP_QUERY_CHUNK_SIZE = 400;
 
 function resolveDatabaseOptions(scope: SessionAccessScope): OpenClawAgentDatabaseOptions {
-  return toDatabaseOptions(resolveSqliteScope(scope));
+  return toDatabaseOptions(resolveSqliteAccessScope(scope));
 }
 
 function getSessionMemberKysely(database: OpenClawAgentDatabase) {
@@ -39,7 +39,7 @@ export function listSessionMembers(scope: SessionAccessScope): SessionMember[] {
     db
       .selectFrom("session_members")
       .select(["identity_id", "added_by", "added_at"])
-      .where("session_key", "=", resolveSqliteScope(scope).sessionKey)
+      .where("session_key", "=", resolveSqliteAccessScope(scope).sessionKey)
       .orderBy("identity_id"),
   ).rows.map((row) => ({
     identityId: row.identity_id,
@@ -95,7 +95,7 @@ export function isSessionMember(scope: SessionAccessScope, identityId: string): 
       db
         .selectFrom("session_members")
         .select("identity_id")
-        .where("session_key", "=", resolveSqliteScope(scope).sessionKey)
+        .where("session_key", "=", resolveSqliteAccessScope(scope).sessionKey)
         .where("identity_id", "=", normalizedIdentityId),
     ),
   );
@@ -149,7 +149,7 @@ export function addSessionMember(
   const inserted = runOpenClawAgentWriteTransaction((database) => {
     assertAuthorizedSessionInstance(
       database,
-      resolveSqliteScope(scope).sessionKey,
+      resolveSqliteAccessScope(scope).sessionKey,
       params.expectedSessionId,
     );
     const db = getSessionMemberKysely(database);
@@ -158,7 +158,7 @@ export function addSessionMember(
       db
         .insertInto("session_members")
         .values({
-          session_key: resolveSqliteScope(scope).sessionKey,
+          session_key: resolveSqliteAccessScope(scope).sessionKey,
           identity_id: identityId,
           added_by: addedBy,
           added_at: addedAt,
@@ -184,7 +184,7 @@ export function removeSessionMember(
   return runOpenClawAgentWriteTransaction((database) => {
     assertAuthorizedSessionInstance(
       database,
-      resolveSqliteScope(scope).sessionKey,
+      resolveSqliteAccessScope(scope).sessionKey,
       expectedSessionId,
     );
     const db = getSessionMemberKysely(database);
@@ -193,7 +193,7 @@ export function removeSessionMember(
       db
         .selectFrom("session_members")
         .select(["identity_id", "added_by", "added_at"])
-        .where("session_key", "=", resolveSqliteScope(scope).sessionKey)
+        .where("session_key", "=", resolveSqliteAccessScope(scope).sessionKey)
         .where("identity_id", "=", normalizedIdentityId),
     );
     if (
@@ -206,7 +206,7 @@ export function removeSessionMember(
       database.db,
       db
         .deleteFrom("session_members")
-        .where("session_key", "=", resolveSqliteScope(scope).sessionKey)
+        .where("session_key", "=", resolveSqliteAccessScope(scope).sessionKey)
         .where("identity_id", "=", normalizedIdentityId),
     );
     return { identityId: row.identity_id, addedBy: row.added_by, addedAt: row.added_at };

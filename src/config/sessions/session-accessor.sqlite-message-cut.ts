@@ -21,7 +21,7 @@ import { loadTranscriptEventsFromDatabase } from "./session-accessor.sqlite-read
 import {
   getSessionKysely,
   normalizeSqliteSessionKey,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
   type ResolvedSqliteScope,
@@ -138,7 +138,7 @@ export async function listSessionBranches(
   params: SessionBranchListParams,
 ): Promise<SessionBranchListResult> {
   const sourceKey = normalizeSqliteSessionKey(params.sessionStoreKey ?? params.sessionKey);
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     ...(params.env ? { env: params.env } : {}),
     sessionKey: sourceKey,
@@ -211,7 +211,7 @@ async function mutateSqliteSessionAtMessage(
   const sourceKey = normalizeSqliteSessionKey(params.sessionStoreKey ?? params.sessionKey);
   const targetKey =
     mode === "fork" ? normalizeSqliteSessionKey(params.targetKey ?? params.sessionKey) : sourceKey;
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     ...(params.env ? { env: params.env } : {}),
     sessionKey: sourceKey,

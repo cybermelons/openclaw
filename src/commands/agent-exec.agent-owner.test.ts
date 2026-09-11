@@ -3,7 +3,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
-import { resolveSqliteScope } from "../config/sessions/session-accessor.sqlite-scope.js";
+import {
+  isSqliteAgentKeyMismatchError,
+  resolveSqliteScopeForAgent,
+} from "../config/sessions/session-accessor.sqlite-scope.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { agentExecCommand } from "./agent-exec.js";
 
@@ -56,7 +59,7 @@ describe("agent exec owner selection", () => {
 
       // Exercise the production guard that rejects keys owned by another agent.
       expect(() =>
-        resolveSqliteScope({
+        resolveSqliteScopeForAgent({
           agentId: requestedAgentId,
           defaultAgentId: "alpha",
           env: process.env,
@@ -64,6 +67,26 @@ describe("agent exec owner selection", () => {
           storePath,
         }),
       ).not.toThrow();
+
+      // issue #118: a store owned by one agent, requested under another, must fail with the
+      // typed mismatch error rather than silently selecting a store the caller does not own.
+      let mismatch: unknown;
+      try {
+        resolveSqliteScopeForAgent({
+          agentId: "beta",
+          defaultAgentId: "alpha",
+          env: process.env,
+          sessionKey: `agent:beta:explicit:${sessionId}`,
+          storePath,
+        });
+      } catch (error) {
+        mismatch = error;
+      }
+      expect(isSqliteAgentKeyMismatchError(mismatch)).toBe(true);
+      if (isSqliteAgentKeyMismatchError(mismatch)) {
+        expect(mismatch.code).toBe("agent_key_mismatch");
+      }
+
       expect(requestedAgentId).toBe("alpha");
       return {
         payloads: [{ text: "done" }],

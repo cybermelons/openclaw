@@ -14,7 +14,7 @@ import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
 import { publishSessionEntryCacheInvalidation } from "./session-accessor.sqlite-entry-cache.js";
 import {
   getSessionKysely,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
 import {
@@ -44,7 +44,7 @@ export function recordSessionParticipant(
   ) {
     return null;
   }
-  const resolved = resolveSqliteScope(scope);
+  const resolved = resolveSqliteAccessScope(scope);
   const options = toDatabaseOptions(resolved);
   const promptedAt = params.promptedAt ?? Date.now();
   const result = runOpenClawAgentWriteTransaction(

@@ -11,7 +11,7 @@ import {
   writeSessionResumeEpoch,
 } from "../config/sessions/session-accessor.sqlite-resume-epoch-store.js";
 import {
-  resolveSqliteScope,
+  resolveSqliteScopeForAgent,
   toDatabaseOptions,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
 import { appendTranscriptMessageInTransaction } from "../config/sessions/session-accessor.sqlite-transcript-message-append.js";
@@ -193,7 +193,7 @@ describe("reconcileCliTranscript", () => {
     eventId: string;
     message: { role: string; content: unknown; timestamp: number };
   }): void {
-    const resolved = resolveSqliteScope({
+    const resolved = resolveSqliteScopeForAgent({
       agentId: "main",
       env: params.env,
       sessionKey: params.sessionKey,
@@ -726,7 +726,7 @@ describe("drainTailForResume", () => {
       drainedThroughSeq: null,
     });
 
-    const scope = resolveSqliteScope({ agentId: "main", env, sessionKey });
+    const scope = resolveSqliteScopeForAgent({ agentId: "main", env, sessionKey });
     const resumed = readSessionResumeEpochForScope(
       { ...scope, sessionId: entry.sessionId },
       sessionKey,

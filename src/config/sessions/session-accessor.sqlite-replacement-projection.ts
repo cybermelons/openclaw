@@ -23,7 +23,7 @@ import {
 } from "./session-accessor.sqlite-maintenance.js";
 import {
   cloneSessionEntry,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
   resolveSqliteTranscriptArchiveDirectory,
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
@@ -63,7 +63,7 @@ async function applySqliteSessionEntryReplacementProjection<T, TReplacement>(
   params: ReplacementProjectionParams<T, TReplacement>,
   normalize: (replacements: Iterable<TReplacement> | undefined) => SqliteSessionEntryReplacement[],
 ): Promise<T> {
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     sessionKey: params.activeSessionKey ?? params.sessionKeys?.[0] ?? "",
     storePath: params.storePath,

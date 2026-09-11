@@ -67,7 +67,8 @@ import {
 import { applySessionEntryExactReplacements } from "./session-accessor.sqlite-replacement-projection.js";
 import {
   cloneSessionEntry,
-  resolveSqliteScope,
+  resolveSqliteAccessScope,
+  resolveSqliteAgentScope,
   resolveSqliteStoreScope,
   resolveSqliteTranscriptArchiveDirectory,
   runExclusiveSqliteSessionWrite,
@@ -119,7 +120,7 @@ export async function applySessionStoreProjection<T>(params: {
         result: T;
       };
 }): Promise<T> {
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAccessScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
     sessionKey: params.activeSessionKey ?? "",
     storePath: params.storePath,
@@ -288,9 +289,8 @@ export async function applySessionEntryLifecycleMutation(params: {
   /** Synchronous caller-authority guard checked immediately before lifecycle writes. */
   beforeCommitInTransaction?: () => void;
 }): Promise<SessionEntryLifecycleMutationResult> {
-  const resolved = resolveSqliteScope({
+  const resolved = resolveSqliteAgentScope({
     ...(params.agentId ? { agentId: params.agentId } : {}),
-    sessionKey: "",
     storePath: params.storePath,
   });
   const removals = [...(params.removals ?? [])];
