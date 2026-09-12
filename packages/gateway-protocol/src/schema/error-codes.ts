@@ -16,6 +16,7 @@ export {
   type CronJobNotFoundErrorDetails,
   type ErrorCode,
   type GatewayErrorDetails,
+  type InvalidSessionKeyErrorDetails,
   type McpAppViewExpiredErrorDetails,
   type MissingScopeErrorDetails,
   type UserPrefsLimitExceededErrorDetails,
@@ -60,6 +61,11 @@ export const WizardNotFoundErrorDetailsSchema = closedObject({
   code: Type.Literal(GatewayErrorDetailCodes.WIZARD_NOT_FOUND),
 });
 
+export const InvalidSessionKeyErrorDetailsSchema = closedObject({
+  code: Type.Literal(GatewayErrorDetailCodes.INVALID_SESSION_KEY),
+  reason: NonEmptyString,
+});
+
 export const ProjectCloneErrorDetailsSchema = closedObject({
   code: Type.Literal(GatewayErrorDetailCodes.PROJECT_CLONE_FAILED),
   cause: Type.String({
@@ -76,6 +82,7 @@ export const GatewayErrorDetailsSchema = Type.Union([
   ProjectCloneErrorDetailsSchema,
   UnknownAgentIdErrorDetailsSchema,
   WizardNotFoundErrorDetailsSchema,
+  InvalidSessionKeyErrorDetailsSchema,
 ]);
 
 /** Builds the canonical gateway error payload while preserving optional retry metadata. */

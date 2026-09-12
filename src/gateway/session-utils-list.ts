@@ -474,8 +474,12 @@ function prepareSessionList(params: ListSessionsFromStoreParams) {
  * resolver. A scope with no agent id and no owned store returns a typed
  * SqliteScopeResolutionError. Catch only that classifiable case here, so a real
  * database fault still propagates instead of silently degrading the catalog.
- * Full removal of this local guard belongs with Layer 1, when the gateway
- * boundary validates the key and owns the error before the catalog query runs.
+ *
+ * issue #124 Layer 1 kept this guard: sessions.list passes a free-form `agentId`
+ * filter, not a client session key, so it has no entry in
+ * SESSION_KEY_PARAM_BY_METHOD and the gateway request boundary never sees a key
+ * to validate for this path. This catch remains the sole owner of the failure
+ * here.
  */
 function listLiveSessionCategoriesSafe(agentId?: string): string[] | undefined {
   try {

@@ -809,21 +809,12 @@ describe("gateway agent handler", () => {
     resetTimeConfig();
   });
 
-  it("rejects malformed agent session keys early in agent handler", async () => {
-    mocks.agentCommand.mockClear();
-    const respond = await invokeAgent(
-      {
-        message: "test",
-        sessionKey: "agent:main",
-        idempotencyKey: "test-malformed-session-key",
-      },
-      { reqId: "4" },
-    );
-
-    expect(mocks.agentCommand).not.toHaveBeenCalled();
-    const error = expectRespondError(respond, {});
-    expectStringFieldContains(error, "message", "malformed session key");
-  });
+  // issue #124 Layer 1 follow-up: the local malformed-agent-key rejection previously tested
+  // here (agent-request-routing.ts) was removed as dead duplicate policy - the gateway request
+  // boundary guard (server-methods.ts, method "agent" via SESSION_KEY_PARAM_BY_METHOD) already
+  // rejects it before this handler runs. That guard's contract is covered by
+  // server.agent.gateway-server-agent-a.test.ts, which invokes the handler through the full
+  // envelope; invokeAgent here calls the handler directly and can no longer observe the guard.
 
   it.each(["/reset", "/new", "/reset check status"] as const)(
     "rejects %s for write-scoped gateway callers",

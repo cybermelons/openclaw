@@ -1,6 +1,7 @@
 import {
   ErrorCodes,
   errorShape,
+  GatewayErrorDetailCodes,
   missingScopeErrorShape,
   type ErrorShape,
 } from "../../packages/gateway-protocol/src/index.js";
@@ -20,6 +21,7 @@ import {
   tryBeginGatewayPreparedRestartRootWorkAdmission,
   tryBeginGatewayRootWorkAdmission,
 } from "../process/gateway-work-admission.js";
+import { malformedSessionKeyReason } from "../sessions/session-key-utils.js";
 import { formatControlPlaneActor, resolveControlPlaneActor } from "./control-plane-audit.js";
 import {
   consumeControlPlaneWriteBudget,
@@ -55,8 +57,10 @@ import type {
   GatewayRequestOptions,
   SessionMutationAuthorization,
 } from "./server-methods/types.js";
+import { readSessionSharingStringParam } from "./session-sharing-target-input.js";
 import {
   resolveSessionMutationAuthorization,
+  SESSION_KEY_PARAM_BY_METHOD,
   SessionMutationAuthorizationChangedError,
 } from "./session-sharing.js";
 import { classifyGatewayStaleInstall } from "./stale-install.js";
@@ -506,6 +510,35 @@ export async function runWithGatewayRequestEnvelope<T>(
       rootWorkAdmission?.release();
     }
   }
+  // issue #124 Layer 1: reject a structurally malformed client session key here, before any
+  // handler or storage call. A param may legitimately be absent (some methods fall back to a
+  // runId or board ticket instead) - only a present-but-malformed key is rejected. A bare
+  // relative key (e.g. "main") is NOT malformed - it is a legacy/alias key that downstream
+  // resolution scopes to the default agent, so it must fall through to dispatch.
+  const sessionKeyParam = SESSION_KEY_PARAM_BY_METHOD.get(method);
+  const rawSessionKey = sessionKeyParam
+    ? readSessionSharingStringParam(options.requestParams, sessionKeyParam)
+    : undefined;
+  if (rawSessionKey) {
+    const reason = malformedSessionKeyReason(rawSessionKey);
+    if (reason) {
+      const invalidKeyError = errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        `invalid ${method} params: malformed session key "${rawSessionKey}"`,
+        {
+          details: {
+            code: GatewayErrorDetailCodes.INVALID_SESSION_KEY,
+            reason,
+          },
+        },
+      );
+      try {
+        return await options.reject(invalidKeyError);
+      } finally {
+        rootWorkAdmission?.release();
+      }
+    }
+  }
   const invokeWithRequestScope = async () => {
     try {
       const pluginRegistry =
@@ -531,6 +564,10 @@ export async function runWithGatewayRequestEnvelope<T>(
       // issue #118: a malformed or agent-less session key is client input, not a server
       // fault. Map it to a client error at the boundary so it never propagates as a 500 or
       // reaches the process as an unhandled rejection that could exit the gateway.
+      // issue #124 Layer 1 kept this reactive catch: it stays the owner for scope failures
+      // the proactive guard above cannot see, e.g. sessions.list resolving an agentId that
+      // carries no client session key param (SESSION_KEY_PARAM_BY_METHOD has no entry for
+      // it), and any other handler-internal resolver call outside that table.
       if (isSqliteScopeResolutionError(error)) {
         return await options.reject(errorShape(ErrorCodes.INVALID_REQUEST, error.message));
       }

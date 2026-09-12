@@ -278,6 +278,32 @@ export function parseAgentSessionKey(
   return { agentId, rest };
 }
 
+/**
+ * Gateway request boundary check (issue #124 Layer 1). Returns the malformed reason for a
+ * present client session key that claims the `agent:` prefix but is structurally broken
+ * (e.g. `"agent:"`, `"agent::x"`), or `undefined` when the key is fine to let through.
+ *
+ * A bare relative key like `"main"` is NOT malformed — `toAgentStoreSessionKey` (routing/
+ * session-key.ts) scopes any non-`agent:`-prefixed key to the default agent by design, so
+ * legacy/alias keys must reach that resolution, not get rejected here. This mirrors the
+ * same "agent:"-prefixed-but-unparseable rule `classifySessionKeyShape` uses for its
+ * "malformed_agent" shape (routing/session-key.ts) — duplicated locally rather than
+ * imported to avoid a module cycle (that module imports this one).
+ */
+export function malformedSessionKeyReason(
+  sessionKey: string | undefined | null,
+): "missing_agent_id" | "missing_rest" | undefined {
+  if (parseAgentSessionKey(sessionKey)) {
+    return undefined;
+  }
+  const raw = normalizeSessionKeyPreservingOpaquePeerIds(sessionKey);
+  if (!raw || !raw.startsWith("agent:")) {
+    return undefined;
+  }
+  const parts = raw.split(":");
+  return !parts[1] ? "missing_agent_id" : "missing_rest";
+}
+
 export function isCronRunSessionKey(sessionKey: string | undefined | null): boolean {
   const parsed = parseAgentSessionKey(sessionKey);
   if (!parsed) {

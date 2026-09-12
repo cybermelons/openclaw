@@ -12,6 +12,7 @@ export {
 export type {
   CronJobNotFoundErrorDetails,
   GatewayErrorDetails,
+  InvalidSessionKeyErrorDetails,
   McpAppViewExpiredErrorDetails,
   MissingScopeErrorDetails,
   UserPrefsLimitExceededErrorDetails,
@@ -22,6 +23,7 @@ export type {
 export {
   CronJobNotFoundErrorDetailsSchema,
   GatewayErrorDetailsSchema,
+  InvalidSessionKeyErrorDetailsSchema,
   MissingScopeErrorDetailsSchema,
   UserPrefsLimitExceededErrorDetailsSchema,
   ProjectCloneErrorDetailsSchema,
