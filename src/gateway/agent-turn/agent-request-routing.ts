@@ -86,11 +86,12 @@ export async function prepareAgentRequestRouting(params: {
     classifySessionKeyShape(requestedToRaw) === "agent"
       ? requestedToRaw
       : undefined;
-  // issue #124 Layer 1: no local malformed-agent-key check here. requestedSessionKeyRaw is
-  // either params.request.sessionKey (validated by the gateway request boundary guard in
-  // server-methods.ts before this handler ever runs - "agent" is in SESSION_KEY_PARAM_BY_METHOD)
-  // or sessionKeyFromTo, which is only ever set when classifySessionKeyShape(requestedToRaw) is
-  // already "agent" (well-formed) above - so it can never itself be malformed_agent.
+  // issue #124 Layer 1 / #127: no local malformed-agent-key check here. Only wire requests are
+  // pre-validated by handleGatewayRequest's boundary guard; the internal facade bypasses that
+  // guard by calling runWithGatewayRequestEnvelope directly, so its reactive
+  // isSqliteScopeResolutionError catch backstops scope resolution on that path instead.
+  // sessionKeyFromTo is well-formed by construction: it is only ever set when
+  // classifySessionKeyShape(requestedToRaw) is already "agent" above.
   const requestedSessionKeyRaw = requestedSessionKeyParam ?? sessionKeyFromTo;
   if (requestedSessionKeyRaw) {
     const requestedSessionAgent = resolveRequestedSessionAgentId(

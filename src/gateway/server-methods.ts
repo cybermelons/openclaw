@@ -57,10 +57,9 @@ import type {
   GatewayRequestOptions,
   SessionMutationAuthorization,
 } from "./server-methods/types.js";
-import { readSessionSharingStringParam } from "./session-sharing-target-input.js";
+import { readClientSessionKeys } from "./session-mutation-targets.js";
 import {
   resolveSessionMutationAuthorization,
-  SESSION_KEY_PARAM_BY_METHOD,
   SessionMutationAuthorizationChangedError,
 } from "./session-sharing.js";
 import { classifyGatewayStaleInstall } from "./stale-install.js";
@@ -510,35 +509,6 @@ export async function runWithGatewayRequestEnvelope<T>(
       rootWorkAdmission?.release();
     }
   }
-  // issue #124 Layer 1: reject a structurally malformed client session key here, before any
-  // handler or storage call. A param may legitimately be absent (some methods fall back to a
-  // runId or board ticket instead) - only a present-but-malformed key is rejected. A bare
-  // relative key (e.g. "main") is NOT malformed - it is a legacy/alias key that downstream
-  // resolution scopes to the default agent, so it must fall through to dispatch.
-  const sessionKeyParam = SESSION_KEY_PARAM_BY_METHOD.get(method);
-  const rawSessionKey = sessionKeyParam
-    ? readSessionSharingStringParam(options.requestParams, sessionKeyParam)
-    : undefined;
-  if (rawSessionKey) {
-    const reason = malformedSessionKeyReason(rawSessionKey);
-    if (reason) {
-      const invalidKeyError = errorShape(
-        ErrorCodes.INVALID_REQUEST,
-        `invalid ${method} params: malformed session key "${rawSessionKey}"`,
-        {
-          details: {
-            code: GatewayErrorDetailCodes.INVALID_SESSION_KEY,
-            reason,
-          },
-        },
-      );
-      try {
-        return await options.reject(invalidKeyError);
-      } finally {
-        rootWorkAdmission?.release();
-      }
-    }
-  }
   const invokeWithRequestScope = async () => {
     try {
       const pluginRegistry =
@@ -565,9 +535,9 @@ export async function runWithGatewayRequestEnvelope<T>(
       // fault. Map it to a client error at the boundary so it never propagates as a 500 or
       // reaches the process as an unhandled rejection that could exit the gateway.
       // issue #124 Layer 1 kept this reactive catch: it stays the owner for scope failures
-      // the proactive guard above cannot see, e.g. sessions.list resolving an agentId that
-      // carries no client session key param (SESSION_KEY_PARAM_BY_METHOD has no entry for
-      // it), and any other handler-internal resolver call outside that table.
+      // the proactive guard in handleGatewayRequest cannot see, e.g. sessions.list resolving
+      // an agentId that carries no client session key param (readClientSessionKeys has no
+      // entry for it), and any other handler-internal resolver call outside that surface.
       if (isSqliteScopeResolutionError(error)) {
         return await options.reject(errorShape(ErrorCodes.INVALID_REQUEST, error.message));
       }
@@ -601,6 +571,34 @@ export async function handleGatewayRequest(
     opts.methodRegistry?.getHandler(req.method) !== undefined
       ? opts.methodRegistry
       : createRequestGatewayMethodRegistry(opts.extraHandlers);
+  // issue #124 Layer 1 / #127: reject a structurally malformed client session key here, ahead
+  // of authorizeGatewayRequestPreDispatch. That authorization call reads session storage on the
+  // raw client key for non-admin callers (resolveSessionMutationAuthorization), so validating
+  // after it would let a malformed key reach a storage read before rejection. A param may
+  // legitimately be absent (some methods fall back to a runId or board ticket instead) - only a
+  // present-but-malformed key is rejected. A bare relative key (e.g. "main") is NOT malformed -
+  // it is a legacy/alias key that downstream resolution scopes to the default agent, so it must
+  // fall through to dispatch.
+  for (const rawSessionKey of readClientSessionKeys(req.method, req.params)) {
+    const reason = malformedSessionKeyReason(rawSessionKey);
+    if (reason) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid ${req.method} params: malformed session key "${rawSessionKey}"`,
+          {
+            details: {
+              code: GatewayErrorDetailCodes.INVALID_SESSION_KEY,
+              reason,
+            },
+          },
+        ),
+      );
+      return;
+    }
+  }
   const authorization = await authorizeGatewayRequestPreDispatch({
     method: req.method,
     requestParams: req.params,
