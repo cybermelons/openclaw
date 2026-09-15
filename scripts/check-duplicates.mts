@@ -33,6 +33,12 @@ const sourcePattern = "**/*.{ts,tsx,js,mjs,cjs}";
 const testPattern = "**/*.{test,e2e.test,live.test}.{ts,tsx,js,mjs,cjs}";
 // Keep local agent support trees and vendored snapshots classified but outside jscpd.
 const intentionallyUnscannedPrefixes = [".agents/", "vendor/"];
+// Repo-root `tmp_*` one-time scripts (root AGENTS.md) are tracked only while an
+// operator still has to run them, and they intentionally duplicate production
+// projection logic to stay pinned to the shape they migrate. Scanning them
+// reports duplication nobody should resolve; dropping them from tracking would
+// strip tooling the docs still point operators at.
+const intentionallyUnscannedRootPrefix = "tmp_";
 
 const generatedIgnores = [
   "**/node_modules/**",
@@ -83,6 +89,10 @@ function isUnderPrefix(value: string, prefix: string) {
   return value === prefix.slice(0, -1) || value.startsWith(prefix);
 }
 
+function isRootOneTimeScript(file: string) {
+  return !file.includes("/") && file.startsWith(intentionallyUnscannedRootPrefix);
+}
+
 function isCoveredByTargets(file: string) {
   return targets.some((target) => {
     const normalizedTarget = normalizeRepoPath(target);
@@ -108,6 +118,7 @@ function listTrackedSourceFiles() {
     .map(normalizeRepoPath)
     .filter((file) => sourceExtensions.has(path.extname(file)))
     .filter((file) => !intentionallyUnscannedPrefixes.some((prefix) => isUnderPrefix(file, prefix)))
+    .filter((file) => !isRootOneTimeScript(file))
     .toSorted((left, right) => left.localeCompare(right));
 }
 
