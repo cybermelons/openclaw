@@ -81,9 +81,14 @@ export const controlUiCodeSplitting = {
         normalizeModuleId(id).includes("/ui/src/") ? "control-ui-core" : "control-ui-foundation",
       tags: ["$initial"] as ["$initial"],
       priority: 10,
-      // 576 KiB keeps the shared normalization graph in one chunk; the previous
-      // 512 KiB boundary split it in two, adding a startup request and ~700 B gzip.
-      maxSize: 576 * 1024,
+      // Each partition this boundary creates is a startup request, and splitting
+      // a shared graph also costs gzip because the parts compress worse apart
+      // than together. At 576 KiB the initial graph had outgrown the boundary
+      // and fragmented into 20 startup requests / 397437 B, tripping both the
+      // request and gzip budgets; 1 MiB holds it in 13 requests / 393202 B.
+      // Raising this is not free: it trades HTTP/1.1 parallelism for fewer,
+      // larger requests, so keep it at the smallest value that holds the graph.
+      maxSize: 1024 * 1024,
     },
   ],
 };
